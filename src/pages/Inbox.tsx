@@ -5,14 +5,14 @@ import { ChannelIcon, channelLabel } from '../components/ui/ChannelIcon';
 import { StatusBadge } from '../components/ui/StatusBadge';
 import { Avatar } from '../components/ui/Avatar';
 import { Modal } from '../components/ui/Modal';
-import type { Channel, Lead, Message } from '../types';
+import type { Channel, Lead } from '../types';
 import { formatDistanceToNow, format } from 'date-fns';
 import { es } from 'date-fns/locale';
 
 const ALL_CHANNELS: (Channel | 'all')[] = ['all', 'whatsapp', 'instagram', 'facebook', 'email', 'web', 'zonaprop', 'argenprop'];
 
 export default function Inbox() {
-  const { leads, setLeads, assignLead } = useApp();
+  const { leads, assignLead, sendMessage, loading } = useApp();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [channelFilter, setChannelFilter] = useState<Channel | 'all'>('all');
   const [reply, setReply] = useState('');
@@ -35,23 +35,11 @@ export default function Inbox() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [selected?.messages.length]);
 
-  const handleSend = () => {
+  const handleSend = async () => {
     if (!reply.trim() || !selected) return;
-    const msg: Message = {
-      id: `m${Date.now()}`,
-      direction: 'out',
-      content: reply.trim(),
-      timestamp: new Date().toISOString(),
-      channel: selected.channel,
-      agentId: 'leticia',
-      read: true,
-    };
-    setLeads(prev => prev.map(l =>
-      l.id === selected.id
-        ? { ...l, messages: [...l.messages, msg], lastActivity: msg.timestamp }
-        : l
-    ));
+    const text = reply.trim();
     setReply('');
+    await sendMessage(selected.id, text);
   };
 
   const unreadInLead = (lead: Lead) => lead.messages.filter(m => !m.read && m.direction === 'in').length;
@@ -84,7 +72,8 @@ export default function Inbox() {
         </div>
 
         <div className="flex-1 overflow-y-auto">
-          {filtered.length === 0 && (
+          {loading && <div className="text-center text-muted py-12 text-sm animate-pulse">Cargando conversaciones...</div>}
+          {!loading && filtered.length === 0 && (
             <div className="text-center text-muted py-12 text-sm">No hay conversaciones</div>
           )}
           {filtered.map(lead => {
@@ -93,7 +82,7 @@ export default function Inbox() {
             return (
               <div
                 key={lead.id}
-                onClick={() => { setSelectedId(lead.id); setLeads(prev => prev.map(l => l.id === lead.id ? { ...l, messages: l.messages.map(m => ({ ...m, read: true })) } : l)); }}
+                onClick={() => { setSelectedId(lead.id); }}
                 className={`flex gap-3 p-4 border-b border-border cursor-pointer transition-all hover:bg-bg-hover ${selectedId === lead.id ? 'bg-bg-hover border-l-2 border-l-crimson' : ''}`}
               >
                 <div className="w-10 h-10 bg-bg-input rounded-full flex items-center justify-center text-sm font-semibold text-white flex-shrink-0">
