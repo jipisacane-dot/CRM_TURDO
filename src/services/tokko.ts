@@ -23,9 +23,10 @@ export interface TokkoOperation {
   operation_id: number;
   operation_type: string; // "Venta" | "Alquiler" | etc.
   prices: {
-    price: string;
+    price: number;      // Tokko sends price as number
     currency: string;
-    period?: string;
+    period?: number;
+    is_promotional?: boolean;
   }[];
 }
 
@@ -45,7 +46,7 @@ export interface TokkoProperty {
   type: { id: number; name: string };
   status: number; // 1=active, 2=reserved, 3=sold/rented
   web_price: boolean;
-  price: string;
+  price: number;
   currency: string;
   suite_amount: number;
   room_amount: number;
@@ -65,10 +66,16 @@ export interface TokkoProperty {
   updated_at?: string;
 }
 
-export interface TokkoListResponse {
-  count: number;
+export interface TokkoMeta {
+  total_count: number;
+  limit: number;
+  offset: number;
   next: string | null;
   previous: string | null;
+}
+
+export interface TokkoListResponse {
+  meta: TokkoMeta;
   objects: TokkoProperty[];
 }
 
@@ -82,9 +89,9 @@ export interface CRMProperty {
   address: string;
   description: string;
   type: string;
-  operations: { type: string; price: string; currency: string }[];
+  operations: { type: string; price: number; currency: string }[];
   mainOperation: string;
-  mainPrice: string;
+  mainPrice: number;
   mainCurrency: string;
   rooms: number;
   bedrooms: number;
@@ -93,9 +100,11 @@ export interface CRMProperty {
   surface: string;
   roofedSurface: string;
   location: string;
+  fullLocation: string;
   coverPhoto: string | null;
   photos: string[];
   status: 'active' | 'reserved' | 'sold';
+  publicUrl: string;
   branch: string;
   agent: string;
   tags: string[];
@@ -105,11 +114,15 @@ export interface CRMProperty {
 
 // ── Normalizer ────────────────────────────────────────────────────────────────
 
+// Tokko status: 2=active/published, 3=reserved, 4=sold/rented (1=draft, unpublished)
+const STATUS_MAP: Record<number, CRMProperty['status']> = {
+  1: 'sold', 2: 'active', 3: 'reserved', 4: 'sold',
+};
+
 export const normalize = (p: TokkoProperty): CRMProperty => {
   const cover = p.photos.find(ph => ph.is_front_cover) ?? p.photos[0];
   const mainOp = p.operations[0];
   const mainPrice = mainOp?.prices[0];
-  const statusMap: Record<number, CRMProperty['status']> = { 1: 'active', 2: 'reserved', 3: 'sold' };
 
   return {
     id: String(p.id),
@@ -121,11 +134,11 @@ export const normalize = (p: TokkoProperty): CRMProperty => {
     type: p.type?.name ?? 'Propiedad',
     operations: p.operations.map(op => ({
       type: op.operation_type,
-      price: op.prices[0]?.price ?? '',
-      currency: op.prices[0]?.currency ?? '',
+      price: op.prices[0]?.price ?? 0,
+      currency: op.prices[0]?.currency ?? 'USD',
     })),
     mainOperation: mainOp?.operation_type ?? '',
-    mainPrice: mainPrice?.price ?? '',
+    mainPrice: mainPrice?.price ?? 0,
     mainCurrency: mainPrice?.currency ?? 'USD',
     rooms: p.room_amount ?? 0,
     bedrooms: p.suite_amount ?? 0,
@@ -133,10 +146,12 @@ export const normalize = (p: TokkoProperty): CRMProperty => {
     parking: p.parking_lot_amount ?? 0,
     surface: p.surface ?? '',
     roofedSurface: p.roofed_surface ?? '',
-    location: p.location?.full_location ?? p.location?.name ?? '',
+    location: p.location?.name ?? '',
+    fullLocation: p.location?.full_location ?? '',
     coverPhoto: cover?.image ?? null,
     photos: p.photos.map(ph => ph.image),
-    status: statusMap[p.status] ?? 'active',
+    status: STATUS_MAP[p.status] ?? 'active',
+    publicUrl: (p as unknown as Record<string, string>).public_url ?? '',
     branch: p.branch?.name ?? '',
     agent: p.agent ? `${p.agent.first_name} ${p.agent.last_name}`.trim() : '',
     tags: p.tags?.map(t => t.name) ?? [],
@@ -155,16 +170,25 @@ const get = async <T>(resource: string, params: Record<string, string> = {}): Pr
 };
 
 export const tokko = {
-  /** Fetch all active properties (handles pagination automatically) */
-  async getProperties(opts: { status?: number; limit?: number } = {}): Promise<CRMProperty[]> {
-    const params: Record<string, string> = {
-      limit: String(opts.limit ?? 100),
-      offset: '0',
-    };
-    if (opts.status !== undefined) params['status'] = String(opts.status);
+  /** Fetch all properties — auto-paginates until all are loaded */
+  async getProperties(): Promise<CRMProperty[]> {
+    const PAGE = 100;
+    const first = await get<TokkoListResponse>('property', { limit: String(PAGE), offset: '0' });
+    const total = first.meta.total_count;
+    const all: TokkoProperty[] = [...first.objects];
 
-    const data = await get<TokkoListResponse>('property', params);
-    return data.objects.map(normalize);
+    // Fetch remaining pages in parallel
+    if (total > PAGE) {
+      const pages = Math.ceil((total - PAGE) / PAGE);
+      const rest = await Promise.all(
+        Array.from({ length: pages }, (_, i) =>
+          get<TokkoListResponse>('property', { limit: String(PAGE), offset: String((i + 1) * PAGE) })
+        )
+      );
+      rest.forEach(r => all.push(...r.objects));
+    }
+
+    return all.map(normalize);
   },
 
   /** Fetch single property by ID */

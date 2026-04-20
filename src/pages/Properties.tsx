@@ -6,13 +6,11 @@ import { Modal } from '../components/ui/Modal';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-const formatPrice = (price: string, currency: string) => {
+const formatPrice = (price: number, currency: string) => {
   if (!price) return '—';
-  const n = parseFloat(price.replace(/[^0-9.]/g, ''));
-  if (isNaN(n)) return price;
   return currency === 'USD'
-    ? `USD ${n.toLocaleString('es-AR')}`
-    : `$ ${n.toLocaleString('es-AR')}`;
+    ? `USD ${price.toLocaleString('es-AR')}`
+    : `$ ${price.toLocaleString('es-AR')}`;
 };
 
 const statusCfg = {
@@ -337,14 +335,16 @@ export default function Properties() {
               </div>
             )}
 
-            <div className="text-center pt-2">
-              <a
-                href={`https://www.tokkobroker.com/properties/${selected.tokkoId}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-xs text-crimson-bright hover:underline"
-              >
-                Ver en Tokko →
+            <div className="flex gap-4 justify-center pt-2">
+              {selected.publicUrl && (
+                <a href={selected.publicUrl} target="_blank" rel="noopener noreferrer"
+                  className="text-xs text-crimson-bright hover:underline">
+                  Ver ficha pública →
+                </a>
+              )}
+              <a href={`https://www.tokkobroker.com/property/${selected.tokkoId}/`} target="_blank" rel="noopener noreferrer"
+                className="text-xs text-muted hover:text-white">
+                Abrir en Tokko →
               </a>
             </div>
           </div>
