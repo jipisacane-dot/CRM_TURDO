@@ -7,6 +7,7 @@ const supabase = createClient(
 
 const FB_TOKEN = Deno.env.get('FB_PAGE_ACCESS_TOKEN')!;
 const FB_PAGE_ID = Deno.env.get('FB_PAGE_ID')!;
+const MANYCHAT_KEY = Deno.env.get('MANYCHAT_API_KEY')!;
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -64,16 +65,13 @@ Deno.serve(async (req) => {
     return new Response(JSON.stringify({ error: msgError.message }), { status: 500, headers: corsHeaders });
   }
 
-  // Try to send via Meta Graph API
+  // Try to send via Meta Graph API (Instagram / Facebook)
   if (contact.channel === 'instagram' || contact.channel === 'facebook') {
     const metaResp = await fetch(
       `https://graph.facebook.com/v21.0/${FB_PAGE_ID}/messages`,
       {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${FB_TOKEN}`,
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Authorization': `Bearer ${FB_TOKEN}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           recipient: { id: contact.channel_id },
           message: { text: content },
@@ -81,11 +79,29 @@ Deno.serve(async (req) => {
         }),
       }
     );
+    if (!metaResp.ok) console.error('Meta API error:', JSON.stringify(await metaResp.json()));
+  }
 
-    if (!metaResp.ok) {
-      const err = await metaResp.json();
-      console.error('Meta API error:', JSON.stringify(err));
-    }
+  // Send via ManyChat API (WhatsApp)
+  if (contact.channel === 'whatsapp' && contact.channel_id) {
+    const mcResp = await fetch('https://api.manychat.com/fb/sending/sendContent', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${MANYCHAT_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        subscriber_id: Number(contact.channel_id),
+        data: {
+          version: 'v2',
+          content: {
+            messages: [{ type: 'text', text: content }],
+          },
+        },
+        message_tag: 'ACCOUNT_UPDATE',
+      }),
+    });
+    if (!mcResp.ok) console.error('ManyChat API error:', JSON.stringify(await mcResp.json()));
   }
 
   return new Response(JSON.stringify({ ok: true, message: msg }), { status: 200, headers: corsHeaders });
