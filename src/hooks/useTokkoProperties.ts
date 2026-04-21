@@ -16,21 +16,21 @@ export const useTokkoProperties = () => {
     lastFetch: null,
   });
 
-  const fetch = useCallback(async () => {
+  const load = useCallback(async (force = false) => {
     if (!tokko.hasKey()) {
       setState(s => ({ ...s, error: 'API key de Tokko no configurada. Creá el archivo .env.local con VITE_TOKKO_KEY=tu_key' }));
       return;
     }
     setState(s => ({ ...s, loading: true, error: null }));
     try {
-      const properties = await tokko.getProperties();
+      const properties = await tokko.getProperties(force);
       setState({ properties, loading: false, error: null, lastFetch: new Date() });
     } catch (e) {
       setState(s => ({ ...s, loading: false, error: (e as Error).message }));
     }
   }, []);
 
-  useEffect(() => { fetch(); }, [fetch]);
+  useEffect(() => { load(); }, [load]);
 
-  return { ...state, refetch: fetch };
+  return { ...state, refetch: () => load(true) };
 };

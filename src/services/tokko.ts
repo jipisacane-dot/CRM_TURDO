@@ -160,6 +160,25 @@ export const normalize = (p: TokkoProperty): CRMProperty => {
   };
 };
 
+// ── Cache ─────────────────────────────────────────────────────────────────────
+
+const CACHE_KEY = 'tokko_props_v1';
+const CACHE_TTL = 10 * 60 * 1000; // 10 min
+
+const getCache = (): CRMProperty[] | null => {
+  try {
+    const raw = localStorage.getItem(CACHE_KEY);
+    if (!raw) return null;
+    const { data, ts } = JSON.parse(raw) as { data: CRMProperty[]; ts: number };
+    if (Date.now() - ts > CACHE_TTL) { localStorage.removeItem(CACHE_KEY); return null; }
+    return data;
+  } catch { return null; }
+};
+
+const setCache = (data: CRMProperty[]) => {
+  try { localStorage.setItem(CACHE_KEY, JSON.stringify({ data, ts: Date.now() })); } catch {}
+};
+
 // ── API calls ─────────────────────────────────────────────────────────────────
 
 const get = async <T>(resource: string, params: Record<string, string> = {}): Promise<T> => {
@@ -170,8 +189,13 @@ const get = async <T>(resource: string, params: Record<string, string> = {}): Pr
 };
 
 export const tokko = {
-  /** Fetch all properties — auto-paginates until all are loaded */
-  async getProperties(): Promise<CRMProperty[]> {
+  /** Fetch all properties — uses localStorage cache (10 min TTL) */
+  async getProperties(forceRefresh = false): Promise<CRMProperty[]> {
+    if (!forceRefresh) {
+      const cached = getCache();
+      if (cached) return cached;
+    }
+
     const PAGE = 100;
     const first = await get<TokkoListResponse>('property', { limit: String(PAGE), offset: '0' });
     const total = first.meta.total_count;
@@ -188,7 +212,9 @@ export const tokko = {
       rest.forEach(r => all.push(...r.objects));
     }
 
-    return all.map(normalize);
+    const result = all.map(normalize);
+    setCache(result);
+    return result;
   },
 
   /** Fetch single property by ID */

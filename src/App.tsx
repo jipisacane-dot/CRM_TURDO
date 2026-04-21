@@ -7,6 +7,8 @@ import Inbox from './pages/Inbox';
 import Leads from './pages/Leads';
 import Properties from './pages/Properties';
 import Team from './pages/Team';
+import Calendar from './pages/Calendar';
+import Analytics from './pages/Analytics';
 
 export default function App() {
   return (
@@ -14,12 +16,14 @@ export default function App() {
       <AppProvider>
         <Routes>
           <Route path="/login" element={<Login />} />
-          <Route path="/" element={<AppLayout><Dashboard /></AppLayout>} />
-          <Route path="/inbox" element={<AppLayout><Inbox /></AppLayout>} />
-          <Route path="/leads" element={<AppLayout><Leads /></AppLayout>} />
-          <Route path="/properties" element={<AppLayout><Properties /></AppLayout>} />
-          <Route path="/team" element={<AppLayout><Team /></AppLayout>} />
-          <Route path="*" element={<Navigate to="/" />} />
+          <Route path="/"            element={<AppLayout><Dashboard /></AppLayout>} />
+          <Route path="/inbox"       element={<AppLayout><Inbox /></AppLayout>} />
+          <Route path="/leads"       element={<AppLayout><Leads /></AppLayout>} />
+          <Route path="/properties"  element={<AppLayout><Properties /></AppLayout>} />
+          <Route path="/team"        element={<AppLayout><Team /></AppLayout>} />
+          <Route path="/calendar"    element={<AppLayout><Calendar /></AppLayout>} />
+          <Route path="/analytics"   element={<AppLayout><Analytics /></AppLayout>} />
+          <Route path="*"            element={<Navigate to="/" />} />
         </Routes>
       </AppProvider>
     </BrowserRouter>

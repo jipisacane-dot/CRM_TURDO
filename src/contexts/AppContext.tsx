@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react';
 import type { Lead, Agent } from '../types';
 import { AGENTS } from '../data/mock';
 import { db, supabase, type DBContact, type DBMessage } from '../services/supabase';
@@ -90,7 +90,6 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   }, [refreshLeads]);
 
   const assignLead = async (leadId: string, agentId: string) => {
-    const agent = AGENTS.find(a => a.id === agentId);
     await db.contacts.update(leadId, {
       assigned_to: agentId,
       status: leads.find(l => l.id === leadId)?.status === 'new' ? 'contacted' : undefined,
@@ -111,16 +110,17 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     const lead = leads.find(l => l.id === leadId);
     if (!lead) return;
 
-    const msg = await db.messages.insert({
-      contact_id: leadId,
-      direction: 'out',
-      content,
-      channel: lead.channel,
-      meta_mid: null,
-      agent_id: currentUser.id,
-      read: true,
+    const { data, error } = await supabase.functions.invoke('send-message', {
+      body: { contact_id: leadId, content, agent_id: currentUser.id },
     });
 
+    if (error) {
+      console.error('Error sending message:', error);
+      alert('Error al enviar: ' + JSON.stringify(error));
+      return;
+    }
+
+    const msg = data.message;
     setLeads(prev => prev.map(l =>
       l.id === leadId
         ? {

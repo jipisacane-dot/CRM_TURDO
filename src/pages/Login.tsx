@@ -27,14 +27,17 @@ export default function Login() {
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
-    if (!password) { setError('Ingresá tu contraseña'); return; }
+    if (!email || !password) { setError('Completá todos los campos'); return; }
     setLoading(true);
-    await new Promise(r => setTimeout(r, 800));
+    // Simple hardcoded auth for demo — replace with Supabase Auth when ready
+    await new Promise(r => setTimeout(r, 600));
     setLoading(false);
     if (password === 'turdo2024' || password === '1234') {
+      const session = { email, exp: Date.now() + 8 * 60 * 60 * 1000 };
+      localStorage.setItem('crm_session', JSON.stringify(session));
       navigate('/');
     } else {
-      setError('Contraseña incorrecta. Usá: 1234');
+      setError('Credenciales incorrectas');
     }
   };
 

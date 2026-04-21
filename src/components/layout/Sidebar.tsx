@@ -1,12 +1,14 @@
-import { NavLink } from 'react-router-dom';
+import { NavLink, useNavigate } from 'react-router-dom';
 import { useApp } from '../../contexts/AppContext';
 
 const NAV = [
-  { to: '/',           icon: '⊞',  label: 'Dashboard'    },
-  { to: '/inbox',      icon: '💬', label: 'Bandeja'       },
-  { to: '/leads',      icon: '👥', label: 'Consultas'     },
-  { to: '/properties', icon: '🏠', label: 'Propiedades'   },
-  { to: '/team',       icon: '👤', label: 'Equipo'        },
+  { to: '/',            icon: '⊞',  label: 'Dashboard'    },
+  { to: '/inbox',       icon: '💬', label: 'Bandeja'       },
+  { to: '/leads',       icon: '👥', label: 'Consultas'     },
+  { to: '/properties',  icon: '🏠', label: 'Propiedades'   },
+  { to: '/team',        icon: '👤', label: 'Equipo'        },
+  { to: '/calendar',    icon: '📅', label: 'Calendario'    },
+  { to: '/analytics',   icon: '📊', label: 'Analíticas'    },
 ];
 
 const TurdoLogo = ({ compact = false }) => (
@@ -29,6 +31,13 @@ const TurdoLogo = ({ compact = false }) => (
 
 export const Sidebar = () => {
   const { unreadCount } = useApp();
+  const navigate = useNavigate();
+
+  const handleLogout = () => {
+    localStorage.removeItem('crm_session');
+    navigate('/login', { replace: true });
+  };
+
   return (
     <aside className="hidden md:flex flex-col w-60 bg-bg-card border-r border-border h-screen sticky top-0 overflow-hidden">
       <div className="px-5 py-5 border-b border-border">
@@ -60,16 +69,23 @@ export const Sidebar = () => {
         ))}
       </nav>
 
-      <div className="px-3 py-4 border-t border-border">
+      <div className="px-3 py-4 border-t border-border space-y-1">
         <div className="flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-bg-hover cursor-pointer transition-all">
           <div className="w-8 h-8 bg-crimson rounded-full flex items-center justify-center text-white text-sm font-bold flex-shrink-0">
             LT
           </div>
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <div className="text-white text-sm font-medium truncate">Leticia Turdo</div>
             <div className="text-muted text-xs">Administradora</div>
           </div>
         </div>
+        <button
+          onClick={handleLogout}
+          className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm text-muted hover:text-red-400 hover:bg-bg-hover transition-all"
+        >
+          <span className="text-base w-5 text-center">⎋</span>
+          <span>Cerrar sesión</span>
+        </button>
       </div>
     </aside>
   );
@@ -77,10 +93,11 @@ export const Sidebar = () => {
 
 export const MobileNav = () => {
   const { unreadCount } = useApp();
+  const MOBILE_NAV = NAV.slice(0, 5);
   return (
     <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-bg-card border-t border-border">
       <div className="flex">
-        {NAV.map(({ to, icon, label }) => (
+        {MOBILE_NAV.map(({ to, icon, label }) => (
           <NavLink
             key={to}
             to={to}
