@@ -6,8 +6,8 @@ const supabase = createClient(
 );
 
 const FB_TOKEN = Deno.env.get('FB_PAGE_ACCESS_TOKEN')!;
+const WA_TOKEN = Deno.env.get('WHATSAPP_TOKEN') ?? Deno.env.get('FB_PAGE_ACCESS_TOKEN')!;
 const MANYCHAT_KEY = Deno.env.get('MANYCHAT_API_KEY')!;
-// Turdo's WhatsApp Business phone_number_id from Meta Business Manager
 const WA_PHONE_NUMBER_ID = Deno.env.get('WHATSAPP_PHONE_NUMBER_ID');
 
 const corsHeaders = {
@@ -50,7 +50,7 @@ async function sendWhatsAppMessage(toPhone: string, text: string): Promise<{ ok:
   if (!WA_PHONE_NUMBER_ID) return { ok: false, error: 'WHATSAPP_PHONE_NUMBER_ID not configured' };
   const resp = await fetch(`https://graph.facebook.com/v20.0/${WA_PHONE_NUMBER_ID}/messages`, {
     method: 'POST',
-    headers: { 'Authorization': `Bearer ${FB_TOKEN}`, 'Content-Type': 'application/json' },
+    headers: { 'Authorization': `Bearer ${WA_TOKEN}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       messaging_product: 'whatsapp',
       to: toPhone,
@@ -133,9 +133,12 @@ Deno.serve(async (req) => {
   let deliveryError = '';
 
   if (contact.channel === 'instagram' && contact.channel_id) {
-    // Step 1: get ig_id (real Instagram PSID) from ManyChat subscriber info
-    const subscriber = await getMCSubscriber(contact.channel_id);
-    const igId = subscriber?.ig_id ? String(subscriber.ig_id) : null;
+    // Use ig_psid stored on contact, fallback to ManyChat lookup
+    let igId = (contact.ig_psid as string | null) ?? null;
+    if (!igId) {
+      const subscriber = await getMCSubscriber(contact.channel_id);
+      igId = subscriber?.ig_id ? String(subscriber.ig_id) : null;
+    }
     console.log(`Instagram — mc_id:${contact.channel_id} ig_id:${igId}`);
 
     if (igId) {
@@ -159,9 +162,12 @@ Deno.serve(async (req) => {
     }
 
   } else if (contact.channel === 'whatsapp' && contact.channel_id) {
-    // Get WhatsApp phone number from ManyChat subscriber data
-    const subscriber = await getMCSubscriber(contact.channel_id);
-    const waPhone = subscriber?.whatsapp_phone as string | null;
+    // Use phone stored on contact (saved by webhook), fallback to ManyChat lookup
+    let waPhone = contact.phone as string | null;
+    if (!waPhone) {
+      const subscriber = await getMCSubscriber(contact.channel_id);
+      waPhone = subscriber?.whatsapp_phone as string | null;
+    }
     console.log(`WhatsApp — mc_id:${contact.channel_id} phone:${waPhone}`);
 
     if (waPhone && WA_PHONE_NUMBER_ID) {

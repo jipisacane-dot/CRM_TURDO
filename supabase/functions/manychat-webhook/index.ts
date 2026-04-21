@@ -46,7 +46,9 @@ Deno.serve(async (req) => {
   const firstName = clean(body.first_name);
   const lastName = clean(body.last_name);
   const name = [firstName, lastName].filter(Boolean).join(' ') || clean(body.name) || 'Sin nombre';
-  const phone = clean(body.phone) || null;
+  // For WhatsApp subscribers, phone comes as whatsapp_phone
+  const phone = clean(body.phone) || clean(body.whatsapp_phone) || null;
+  const igId = body.ig_id ? String(body.ig_id) : null;
   const email = clean(body.email) || null;
   const lastMessage = (body.last_input_text as string) ?? null;
   const avatarUrl = (body.profile_pic as string) ?? null;
@@ -67,6 +69,7 @@ Deno.serve(async (req) => {
         phone,
         email,
         avatar_url: avatarUrl,
+        ig_psid: igId,
         status: 'new',
         branch: 'Sucursal Centro',
         updated_at: new Date().toISOString(),
