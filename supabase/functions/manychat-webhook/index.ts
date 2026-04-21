@@ -38,10 +38,18 @@ Deno.serve(async (req) => {
   const channelRaw = (body.channel as string) ?? 'fb';
   const channel = channelMap[channelRaw] ?? 'facebook';
   const channelId = String(body.id ?? body.key ?? '');
-  const name = [body.first_name, body.last_name].filter(Boolean).join(' ') || (body.name as string) || 'Sin nombre';
-  const phone = (body.phone as string) ?? null;
-  const email = (body.email as string) ?? null;
+
+  // Strip unresolved ManyChat template vars like {{first_name}}
+  const clean = (v: unknown) =>
+    typeof v === 'string' ? v.replace(/\{\{[^}]+\}\}/g, '').trim() : '';
+
+  const firstName = clean(body.first_name);
+  const lastName = clean(body.last_name);
+  const name = [firstName, lastName].filter(Boolean).join(' ') || clean(body.name) || 'Sin nombre';
+  const phone = clean(body.phone) || null;
+  const email = clean(body.email) || null;
   const lastMessage = (body.last_input_text as string) ?? null;
+  const avatarUrl = (body.profile_pic as string) ?? null;
 
   if (!channelId) {
     return new Response('Missing subscriber id', { status: 400 });
@@ -57,6 +65,7 @@ Deno.serve(async (req) => {
         name,
         phone,
         email,
+        avatar_url: avatarUrl,
         status: 'new',
         branch: 'Sucursal Centro',
         updated_at: new Date().toISOString(),

@@ -4,9 +4,10 @@ import { useApp } from '../../contexts/AppContext';
 const NAV = [
   { to: '/',            icon: '⊞',  label: 'Dashboard'    },
   { to: '/inbox',       icon: '💬', label: 'Bandeja'       },
+  { to: '/contacts',    icon: '👤', label: 'Contactos'     },
   { to: '/leads',       icon: '👥', label: 'Consultas'     },
   { to: '/properties',  icon: '🏠', label: 'Propiedades'   },
-  { to: '/team',        icon: '👤', label: 'Equipo'        },
+  { to: '/team',        icon: '🫂', label: 'Equipo'        },
   { to: '/calendar',    icon: '📅', label: 'Calendario'    },
   { to: '/analytics',   icon: '📊', label: 'Analíticas'    },
 ];

@@ -21,6 +21,7 @@ const toLead = (c: DBContact, messages: DBMessage[]): Lead => ({
   name: c.name ?? 'Sin nombre',
   phone: c.phone ?? undefined,
   email: c.email ?? undefined,
+  avatarUrl: c.avatar_url ?? undefined,
   channel: c.channel as Lead['channel'],
   propertyId: c.property_id ?? undefined,
   propertyTitle: c.property_title ?? undefined,
@@ -116,28 +117,10 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
 
     if (error) {
       console.error('Error sending message:', error);
-      alert('Error al enviar: ' + JSON.stringify(error));
       return;
     }
 
-    const msg = data.message;
-    setLeads(prev => prev.map(l =>
-      l.id === leadId
-        ? {
-            ...l,
-            lastActivity: msg.created_at,
-            messages: [...l.messages, {
-              id: msg.id,
-              direction: 'out' as const,
-              content,
-              timestamp: msg.created_at,
-              channel: lead.channel,
-              agentId: currentUser.id,
-              read: true,
-            }],
-          }
-        : l
-    ));
+    await refreshLeads();
   };
 
   const unreadCount = leads.reduce((sum, lead) =>

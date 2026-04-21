@@ -38,6 +38,7 @@ export interface Lead {
   name: string;
   phone?: string;
   email?: string;
+  avatarUrl?: string;
   channel: Channel;
   propertyId?: string;
   propertyTitle?: string;

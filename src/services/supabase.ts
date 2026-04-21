@@ -12,6 +12,7 @@ export interface DBContact {
   name: string | null;
   phone: string | null;
   email: string | null;
+  avatar_url: string | null;
   channel: string;
   channel_id: string | null;
   status: string;

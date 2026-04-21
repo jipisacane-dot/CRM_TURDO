@@ -9,6 +9,26 @@ import type { Channel, Lead } from '../types';
 import { formatDistanceToNow, format } from 'date-fns';
 import { es } from 'date-fns/locale';
 
+function LeadAvatar({ lead, size = 'md' }: { lead: Lead; size?: 'sm' | 'md' }) {
+  const [imgError, setImgError] = useState(false);
+  const sz = size === 'sm' ? 'w-9 h-9 text-xs' : 'w-10 h-10 text-sm';
+  if (lead.avatarUrl && !imgError) {
+    return (
+      <img
+        src={lead.avatarUrl}
+        alt={lead.name}
+        onError={() => setImgError(true)}
+        className={`${sz} rounded-full object-cover flex-shrink-0`}
+      />
+    );
+  }
+  return (
+    <div className={`${sz} bg-crimson/20 border border-crimson/30 rounded-full flex items-center justify-center font-semibold text-crimson flex-shrink-0`}>
+      {lead.name.charAt(0).toUpperCase()}
+    </div>
+  );
+}
+
 const ALL_CHANNELS: (Channel | 'all')[] = ['all', 'whatsapp', 'instagram', 'facebook', 'email', 'web', 'zonaprop', 'argenprop'];
 
 export default function Inbox() {
@@ -85,8 +105,11 @@ export default function Inbox() {
                 onClick={() => { setSelectedId(lead.id); }}
                 className={`flex gap-3 p-4 border-b border-border cursor-pointer transition-all hover:bg-bg-hover ${selectedId === lead.id ? 'bg-bg-hover border-l-2 border-l-crimson' : ''}`}
               >
-                <div className="w-10 h-10 bg-bg-input rounded-full flex items-center justify-center text-sm font-semibold text-white flex-shrink-0">
-                  {lead.name[0]}
+                <div className="relative flex-shrink-0">
+                  <LeadAvatar lead={lead} size="md" />
+                  <div className="absolute -bottom-0.5 -right-0.5">
+                    <ChannelIcon channel={lead.channel} size="sm" />
+                  </div>
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between gap-1">
@@ -118,9 +141,7 @@ export default function Inbox() {
           {/* Header */}
           <div className="flex items-center gap-3 px-4 py-3 border-b border-border bg-bg-card flex-shrink-0">
             <button onClick={() => setSelectedId(null)} className="md:hidden text-muted hover:text-white mr-1">←</button>
-            <div className="w-9 h-9 bg-bg-input rounded-full flex items-center justify-center text-sm font-semibold text-white flex-shrink-0">
-              {selected.name[0]}
-            </div>
+            <LeadAvatar lead={selected} size="sm" />
             <div className="flex-1 min-w-0">
               <div className="text-white font-semibold truncate">{selected.name}</div>
               <div className="flex items-center gap-2 flex-wrap">

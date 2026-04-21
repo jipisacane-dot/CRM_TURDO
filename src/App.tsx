@@ -4,6 +4,7 @@ import { AppLayout } from './components/layout/AppLayout';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Inbox from './pages/Inbox';
+import Contacts from './pages/Contacts';
 import Leads from './pages/Leads';
 import Properties from './pages/Properties';
 import Team from './pages/Team';
@@ -18,6 +19,7 @@ export default function App() {
           <Route path="/login" element={<Login />} />
           <Route path="/"            element={<AppLayout><Dashboard /></AppLayout>} />
           <Route path="/inbox"       element={<AppLayout><Inbox /></AppLayout>} />
+          <Route path="/contacts"    element={<AppLayout><Contacts /></AppLayout>} />
           <Route path="/leads"       element={<AppLayout><Leads /></AppLayout>} />
           <Route path="/properties"  element={<AppLayout><Properties /></AppLayout>} />
           <Route path="/team"        element={<AppLayout><Team /></AppLayout>} />
