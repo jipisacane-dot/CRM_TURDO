@@ -65,20 +65,46 @@ Deno.serve(async (req) => {
     return new Response(JSON.stringify({ error: msgError.message }), { status: 500, headers: corsHeaders });
   }
 
-  // Send via ManyChat API (Instagram / Facebook / WhatsApp)
+  // Send via appropriate channel
   if (['instagram', 'facebook', 'whatsapp'].includes(contact.channel) && contact.channel_id) {
-    const mcResp = await fetch('https://api.manychat.com/fb/sending/sendContent', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${MANYCHAT_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        subscriber_id: Number(contact.channel_id),
-        data: {
-          version: 'v2',
-          content: { messages: [{ type: 'text', text: content }] },
-        },
-      }),
-    });
-    if (!mcResp.ok) console.error('ManyChat send error:', JSON.stringify(await mcResp.json()));
+
+    if (contact.channel === 'instagram') {
+      // For Instagram: get real IGSID from ManyChat, then use Graph API
+      const subInfo = await fetch(
+        `https://api.manychat.com/fb/subscriber/getInfo?subscriber_id=${contact.channel_id}`,
+        { headers: { 'Authorization': `Bearer ${MANYCHAT_KEY}` } }
+      );
+      if (subInfo.ok) {
+        const sub = await subInfo.json();
+        const igId = sub?.data?.ig_id;
+        if (igId) {
+          const metaResp = await fetch(
+            `https://graph.facebook.com/v21.0/${FB_PAGE_ID}/messages`,
+            {
+              method: 'POST',
+              headers: { 'Authorization': `Bearer ${FB_TOKEN}`, 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                recipient: { id: String(igId) },
+                message: { text: content },
+                messaging_type: 'RESPONSE',
+              }),
+            }
+          );
+          if (!metaResp.ok) console.error('Instagram Graph API error:', JSON.stringify(await metaResp.json()));
+        }
+      }
+    } else {
+      // Facebook / WhatsApp: use ManyChat API
+      const mcResp = await fetch('https://api.manychat.com/fb/sending/sendContent', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${MANYCHAT_KEY}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          subscriber_id: Number(contact.channel_id),
+          data: { version: 'v2', content: { messages: [{ type: 'text', text: content }] } },
+        }),
+      });
+      if (!mcResp.ok) console.error('ManyChat send error:', JSON.stringify(await mcResp.json()));
+    }
   }
 
   // Send via ManyChat API (WhatsApp)

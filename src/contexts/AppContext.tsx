@@ -75,12 +75,21 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   // Load on mount
   useEffect(() => { refreshLeads(); }, [refreshLeads]);
 
-  // Realtime subscription for new messages
+  // Realtime subscription — update only the affected contact
   useEffect(() => {
     const channel = supabase
       .channel('crm-realtime')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, () => {
-        refreshLeads();
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, async (payload) => {
+        const newMsg = payload.new as DBMessage;
+        const messages = await db.messages.forContact(newMsg.contact_id);
+        setLeads(prev => prev.map(l => {
+          if (l.id !== newMsg.contact_id) return l;
+          return {
+            ...l,
+            lastActivity: newMsg.created_at,
+            messages: toMessages(messages, l.channel),
+          };
+        }));
       })
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'contacts' }, () => {
         refreshLeads();
