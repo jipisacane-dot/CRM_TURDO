@@ -111,16 +111,32 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     const lead = leads.find(l => l.id === leadId);
     if (!lead) return;
 
-    const { data, error } = await supabase.functions.invoke('send-message', {
+    // Optimistic update — show message instantly
+    const tempId = `temp_${Date.now()}`;
+    const now = new Date().toISOString();
+    setLeads(prev => prev.map(l =>
+      l.id === leadId
+        ? {
+            ...l,
+            lastActivity: now,
+            messages: [...l.messages, {
+              id: tempId,
+              direction: 'out' as const,
+              content,
+              timestamp: now,
+              channel: lead.channel,
+              agentId: currentUser.id,
+              read: true,
+            }],
+          }
+        : l
+    ));
+
+    const { error } = await supabase.functions.invoke('send-message', {
       body: { contact_id: leadId, content, agent_id: currentUser.id },
     });
 
-    if (error) {
-      console.error('Error sending message:', error);
-      return;
-    }
-
-    await refreshLeads();
+    if (error) console.error('Error sending message:', error);
   };
 
   const unreadCount = leads.reduce((sum, lead) =>

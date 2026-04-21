@@ -84,24 +84,31 @@ Deno.serve(async (req) => {
 
   // Send via ManyChat API (WhatsApp)
   if (contact.channel === 'whatsapp' && contact.channel_id) {
+    const mcBody = {
+      subscriber_id: Number(contact.channel_id),
+      data: {
+        version: 'v2',
+        content: { messages: [{ type: 'text', text: content }] },
+      },
+    };
     const mcResp = await fetch('https://api.manychat.com/fb/sending/sendContent', {
       method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${MANYCHAT_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        subscriber_id: Number(contact.channel_id),
-        data: {
-          version: 'v2',
-          content: {
-            messages: [{ type: 'text', text: content }],
-          },
-        },
-        message_tag: 'ACCOUNT_UPDATE',
-      }),
+      headers: { 'Authorization': `Bearer ${MANYCHAT_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(mcBody),
     });
-    if (!mcResp.ok) console.error('ManyChat API error:', JSON.stringify(await mcResp.json()));
+    if (!mcResp.ok) {
+      const err = await mcResp.json();
+      console.error('ManyChat WhatsApp error:', JSON.stringify(err));
+      // Retry with message_tag for out-of-session
+      if (err.code === 3011) {
+        const retryResp = await fetch('https://api.manychat.com/fb/sending/sendContent', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${MANYCHAT_KEY}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...mcBody, message_tag: 'ACCOUNT_UPDATE' }),
+        });
+        if (!retryResp.ok) console.error('ManyChat retry error:', JSON.stringify(await retryResp.json()));
+      }
+    }
   }
 
   return new Response(JSON.stringify({ ok: true, message: msg }), { status: 200, headers: corsHeaders });
