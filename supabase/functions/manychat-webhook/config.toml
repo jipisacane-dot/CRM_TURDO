@@ -1,0 +1,2 @@
+[functions.manychat-webhook]
+verify_jwt = false
