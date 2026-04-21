@@ -91,6 +91,20 @@ Deno.serve(async (req) => {
       meta_mid: metaMid,
       read: false,
     });
+
+    // Auto-detectar email y teléfono en el mensaje
+    const updates: Record<string, string> = {};
+    if (!contact.phone) {
+      const phoneMatch = lastMessage.match(/(?:\+54|0)?(?:11|[2-9]\d)[\s-]?\d{4}[\s-]?\d{4}|\b\d{10,11}\b/);
+      if (phoneMatch) updates.phone = phoneMatch[0].replace(/[\s-]/g, '');
+    }
+    if (!contact.email) {
+      const emailMatch = lastMessage.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
+      if (emailMatch) updates.email = emailMatch[0];
+    }
+    if (Object.keys(updates).length > 0) {
+      await supabase.from('contacts').update(updates).eq('id', contact.id);
+    }
   }
 
   return new Response(JSON.stringify({ ok: true, contact_id: contact?.id }), {
