@@ -50,6 +50,7 @@ Deno.serve(async (req) => {
   const email = clean(body.email) || null;
   const lastMessage = (body.last_input_text as string) ?? null;
   const avatarUrl = (body.profile_pic as string) ?? null;
+  const FB_TOKEN = Deno.env.get('FB_PAGE_ACCESS_TOKEN');
 
   if (!channelId) {
     return new Response('Missing subscriber id', { status: 400 });
@@ -78,6 +79,20 @@ Deno.serve(async (req) => {
   if (contactError) {
     console.error('Error upserting contact:', contactError);
     return new Response(JSON.stringify({ error: contactError.message }), { status: 500 });
+  }
+
+  // Intentar obtener foto de perfil si no vino en el payload
+  if (!avatarUrl && contact && FB_TOKEN && channelId) {
+    try {
+      const picResp = await fetch(
+        `https://graph.facebook.com/v21.0/${channelId}/picture?redirect=false&type=square&access_token=${FB_TOKEN}`
+      );
+      if (picResp.ok) {
+        const picData = await picResp.json();
+        const url = picData?.data?.url;
+        if (url) await supabase.from('contacts').update({ avatar_url: url }).eq('id', contact.id);
+      }
+    } catch { /* silently ignore */ }
   }
 
   // Insertar mensaje si viene texto
