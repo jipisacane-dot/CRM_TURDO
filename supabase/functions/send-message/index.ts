@@ -6,14 +6,77 @@ const supabase = createClient(
 );
 
 const FB_TOKEN = Deno.env.get('FB_PAGE_ACCESS_TOKEN')!;
-const FB_PAGE_ID = Deno.env.get('FB_PAGE_ID')!;
 const MANYCHAT_KEY = Deno.env.get('MANYCHAT_API_KEY')!;
+// Turdo's WhatsApp Business phone_number_id from Meta Business Manager
+const WA_PHONE_NUMBER_ID = Deno.env.get('WHATSAPP_PHONE_NUMBER_ID');
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   'Content-Type': 'application/json',
 };
+
+// Get full subscriber info from ManyChat (includes ig_id, whatsapp_phone, etc.)
+async function getMCSubscriber(subscriberId: string): Promise<Record<string, unknown> | null> {
+  try {
+    const resp = await fetch(
+      `https://api.manychat.com/fb/subscriber/getInfo?subscriber_id=${subscriberId}`,
+      { headers: { 'Authorization': `Bearer ${MANYCHAT_KEY}` } }
+    );
+    if (!resp.ok) return null;
+    const json = await resp.json();
+    return json?.data ?? null;
+  } catch { return null; }
+}
+
+// Send via Meta Instagram Messaging API (requires instagram_manage_messages token)
+async function sendInstagramMessage(igPsid: string, text: string): Promise<{ ok: boolean; error?: string }> {
+  const resp = await fetch('https://graph.facebook.com/v20.0/me/messages', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${FB_TOKEN}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      recipient: { id: igPsid },
+      message: { text },
+      messaging_type: 'RESPONSE',
+    }),
+  });
+  const result = await resp.json();
+  if (!resp.ok) return { ok: false, error: JSON.stringify(result) };
+  return { ok: true };
+}
+
+// Send via WhatsApp Business Cloud API
+async function sendWhatsAppMessage(toPhone: string, text: string): Promise<{ ok: boolean; error?: string }> {
+  if (!WA_PHONE_NUMBER_ID) return { ok: false, error: 'WHATSAPP_PHONE_NUMBER_ID not configured' };
+  const resp = await fetch(`https://graph.facebook.com/v20.0/${WA_PHONE_NUMBER_ID}/messages`, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${FB_TOKEN}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      messaging_product: 'whatsapp',
+      to: toPhone,
+      type: 'text',
+      text: { body: text },
+    }),
+  });
+  const result = await resp.json();
+  if (!resp.ok) return { ok: false, error: JSON.stringify(result) };
+  return { ok: true };
+}
+
+// Send via ManyChat (fallback for all channels)
+async function sendManyChat(subscriberId: number, text: string): Promise<{ ok: boolean; error?: string }> {
+  const resp = await fetch('https://api.manychat.com/fb/sending/sendContent', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${MANYCHAT_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      subscriber_id: subscriberId,
+      data: { version: 'v2', content: { messages: [{ type: 'text', text }] } },
+    }),
+  });
+  const result = await resp.json();
+  if (!resp.ok) return { ok: false, error: JSON.stringify(result) };
+  return { ok: true };
+}
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -65,52 +128,81 @@ Deno.serve(async (req) => {
     return new Response(JSON.stringify({ error: msgError.message }), { status: 500, headers: corsHeaders });
   }
 
-  // Send via appropriate channel
-  if (['instagram', 'facebook', 'whatsapp'].includes(contact.channel) && contact.channel_id) {
+  let deliveryMethod = 'none';
+  let deliveryOk = false;
+  let deliveryError = '';
 
-    // Send via ManyChat API for all channels
-    const mcResp = await fetch('https://api.manychat.com/fb/sending/sendContent', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${MANYCHAT_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        subscriber_id: Number(contact.channel_id),
-        data: { version: 'v2', content: { messages: [{ type: 'text', text: content }] } },
-      }),
-    });
-    if (!mcResp.ok) {
-      const mcErr = await mcResp.json();
-      console.error('ManyChat send error:', JSON.stringify(mcErr));
-    }
-  }
+  if (contact.channel === 'instagram' && contact.channel_id) {
+    // Step 1: get ig_id (real Instagram PSID) from ManyChat subscriber info
+    const subscriber = await getMCSubscriber(contact.channel_id);
+    const igId = subscriber?.ig_id ? String(subscriber.ig_id) : null;
+    console.log(`Instagram — mc_id:${contact.channel_id} ig_id:${igId}`);
 
-  // Send via ManyChat API (WhatsApp)
-  if (contact.channel === 'whatsapp' && contact.channel_id) {
-    const mcBody = {
-      subscriber_id: Number(contact.channel_id),
-      data: {
-        version: 'v2',
-        content: { messages: [{ type: 'text', text: content }] },
-      },
-    };
-    const mcResp = await fetch('https://api.manychat.com/fb/sending/sendContent', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${MANYCHAT_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(mcBody),
-    });
-    if (!mcResp.ok) {
-      const err = await mcResp.json();
-      console.error('ManyChat WhatsApp error:', JSON.stringify(err));
-      // Retry with message_tag for out-of-session
-      if (err.code === 3011) {
-        const retryResp = await fetch('https://api.manychat.com/fb/sending/sendContent', {
-          method: 'POST',
-          headers: { 'Authorization': `Bearer ${MANYCHAT_KEY}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ...mcBody, message_tag: 'ACCOUNT_UPDATE' }),
-        });
-        if (!retryResp.ok) console.error('ManyChat retry error:', JSON.stringify(await retryResp.json()));
+    if (igId) {
+      // Try Meta Graph API with real PSID (requires instagram_manage_messages on token)
+      const result = await sendInstagramMessage(igId, content);
+      if (result.ok) {
+        deliveryMethod = 'meta_instagram'; deliveryOk = true;
+      } else {
+        deliveryError = `meta:${result.error}`;
+        console.error('Meta IG failed:', result.error);
+        // Fallback to ManyChat
+        const mc = await sendManyChat(Number(contact.channel_id), content);
+        if (mc.ok) { deliveryMethod = 'manychat'; deliveryOk = true; }
+        else { deliveryMethod = 'failed'; deliveryError += ` mc:${mc.error}`; }
       }
+    } else {
+      const mc = await sendManyChat(Number(contact.channel_id), content);
+      deliveryMethod = mc.ok ? 'manychat' : 'failed';
+      deliveryOk = mc.ok;
+      deliveryError = mc.error ?? '';
+    }
+
+  } else if (contact.channel === 'whatsapp' && contact.channel_id) {
+    // Get WhatsApp phone number from ManyChat subscriber data
+    const subscriber = await getMCSubscriber(contact.channel_id);
+    const waPhone = subscriber?.whatsapp_phone as string | null;
+    console.log(`WhatsApp — mc_id:${contact.channel_id} phone:${waPhone}`);
+
+    if (waPhone && WA_PHONE_NUMBER_ID) {
+      // Try WhatsApp Business Cloud API
+      const result = await sendWhatsAppMessage(waPhone, content);
+      if (result.ok) {
+        deliveryMethod = 'whatsapp_cloud'; deliveryOk = true;
+      } else {
+        deliveryError = `wa_cloud:${result.error}`;
+        console.error('WA Cloud failed:', result.error);
+        // Fallback to ManyChat
+        const mc = await sendManyChat(Number(contact.channel_id), content);
+        if (mc.ok) { deliveryMethod = 'manychat'; deliveryOk = true; }
+        else { deliveryMethod = 'failed'; deliveryError += ` mc:${mc.error}`; }
+      }
+    } else {
+      const mc = await sendManyChat(Number(contact.channel_id), content);
+      deliveryMethod = mc.ok ? 'manychat' : 'failed';
+      deliveryOk = mc.ok;
+      deliveryError = mc.error ?? '';
+    }
+
+  } else if (contact.channel === 'facebook' && contact.channel_id) {
+    // Facebook Messenger — use Meta Graph API directly (token has pages_messaging)
+    const result = await sendInstagramMessage(contact.channel_id, content);
+    if (result.ok) {
+      deliveryMethod = 'meta_messenger'; deliveryOk = true;
+    } else {
+      deliveryError = `meta:${result.error}`;
+      const mc = await sendManyChat(Number(contact.channel_id), content);
+      deliveryMethod = mc.ok ? 'manychat' : 'failed';
+      deliveryOk = mc.ok;
+      if (!mc.ok) deliveryError += ` mc:${mc.error}`;
     }
   }
 
-  return new Response(JSON.stringify({ ok: true, message: msg }), { status: 200, headers: corsHeaders });
+  console.log(`Delivery: channel=${contact.channel} method=${deliveryMethod} ok=${deliveryOk} error=${deliveryError}`);
+
+  return new Response(JSON.stringify({
+    ok: true,
+    message: msg,
+    delivery: { ok: deliveryOk, method: deliveryMethod, error: deliveryError || undefined },
+  }), { status: 200, headers: corsHeaders });
 });
