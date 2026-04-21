@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AppProvider } from './contexts/AppContext';
 import { AppLayout } from './components/layout/AppLayout';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Inbox from './pages/Inbox';
@@ -15,6 +16,7 @@ export default function App() {
   return (
     <BrowserRouter>
       <AppProvider>
+        <ErrorBoundary>
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/"            element={<AppLayout><Dashboard /></AppLayout>} />
@@ -27,6 +29,7 @@ export default function App() {
           <Route path="/analytics"   element={<AppLayout><Analytics /></AppLayout>} />
           <Route path="*"            element={<Navigate to="/" />} />
         </Routes>
+        </ErrorBoundary>
       </AppProvider>
     </BrowserRouter>
   );
