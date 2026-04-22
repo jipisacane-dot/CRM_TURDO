@@ -50,7 +50,9 @@ Deno.serve(async (req) => {
   const phone = clean(body.phone) || clean(body.whatsapp_phone) || null;
   const igId = body.ig_id ? String(body.ig_id) : null;
   const email = clean(body.email) || null;
-  const lastMessage = (body.last_input_text as string) ?? null;
+  const lastMessageRaw = clean(body.last_input_text) || null;
+  // Discard if ManyChat sent an unresolved template variable
+  const lastMessage = lastMessageRaw && /^\{\{.*\}\}$/.test(lastMessageRaw.trim()) ? null : lastMessageRaw;
   const avatarUrl = (body.profile_pic as string) ?? null;
   const FB_TOKEN = Deno.env.get('FB_PAGE_ACCESS_TOKEN');
 
@@ -123,6 +125,19 @@ Deno.serve(async (req) => {
     if (Object.keys(updates).length > 0) {
       await supabase.from('contacts').update(updates).eq('id', contact.id);
     }
+  }
+
+  // Send push notification for new message
+  if (lastMessage && contact) {
+    const contactName = contact.name ?? 'Nuevo mensaje';
+    supabase.functions.invoke('send-push', {
+      body: {
+        title: contactName,
+        body: lastMessage.slice(0, 100),
+        contact_id: contact.id,
+        url: '/inbox',
+      },
+    }).catch(console.error);
   }
 
   return new Response(JSON.stringify({ ok: true, contact_id: contact?.id }), {
