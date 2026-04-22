@@ -1,7 +1,6 @@
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useApp } from '../../contexts/AppContext';
 import { usePushNotifications } from '../../hooks/usePushNotifications';
-import { useRegisterSW } from 'virtual:pwa-register/react';
 
 const Icon = ({ d, size = 16 }: { d: string; size?: number }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
@@ -56,7 +55,6 @@ export const Sidebar = () => {
   const { unreadCount, dueReminders } = useApp();
   const navigate = useNavigate();
   const { status: pushStatus, loading: pushLoading, subscribe, unsubscribe } = usePushNotifications();
-  const { needRefresh: [needRefresh], updateServiceWorker } = useRegisterSW();
 
   const handleLogout = () => {
     localStorage.removeItem('crm_session');
@@ -110,16 +108,6 @@ export const Sidebar = () => {
       </nav>
 
       <div className="px-3 py-4 border-t border-border space-y-1">
-
-        {needRefresh && (
-          <button
-            onClick={() => updateServiceWorker(true)}
-            className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs bg-crimson/5 text-crimson border border-crimson/15 hover:bg-crimson/10 transition-all mb-1"
-          >
-            <Icon d={ICONS.refresh} size={13} />
-            Nueva versión disponible
-          </button>
-        )}
 
         {pushStatus !== 'unsupported' && (
           <button
