@@ -162,16 +162,20 @@ export const normalize = (p: TokkoProperty): CRMProperty => {
 
 // ── Cache ─────────────────────────────────────────────────────────────────────
 
-const CACHE_KEY = 'tokko_props_v1';
-const CACHE_TTL = 10 * 60 * 1000; // 10 min
+const CACHE_KEY = 'tokko_props_v2';
+const CACHE_TTL = 60 * 60 * 1000; // 60 min
+const CACHE_STALE = 5 * 60 * 1000; // serve stale up to 5 min after TTL before showing spinner
 
-const getCache = (): CRMProperty[] | null => {
+interface CacheEntry { data: CRMProperty[]; ts: number }
+
+const getCache = (): { data: CRMProperty[]; stale: boolean } | null => {
   try {
     const raw = localStorage.getItem(CACHE_KEY);
     if (!raw) return null;
-    const { data, ts } = JSON.parse(raw) as { data: CRMProperty[]; ts: number };
-    if (Date.now() - ts > CACHE_TTL) { localStorage.removeItem(CACHE_KEY); return null; }
-    return data;
+    const { data, ts } = JSON.parse(raw) as CacheEntry;
+    const age = Date.now() - ts;
+    if (age > CACHE_TTL + CACHE_STALE) { localStorage.removeItem(CACHE_KEY); return null; }
+    return { data, stale: age > CACHE_TTL };
   } catch { return null; }
 };
 
@@ -189,32 +193,44 @@ const get = async <T>(resource: string, params: Record<string, string> = {}): Pr
 };
 
 export const tokko = {
-  /** Fetch all properties — uses localStorage cache (10 min TTL) */
+  /** Fetch all properties — stale-while-revalidate cache (60 min TTL) */
   async getProperties(forceRefresh = false): Promise<CRMProperty[]> {
-    if (!forceRefresh) {
-      const cached = getCache();
-      if (cached) return cached;
+    const cached = !forceRefresh ? getCache() : null;
+
+    // Return fresh cache immediately
+    if (cached && !cached.stale) return cached.data;
+
+    const fetchFresh = async (): Promise<CRMProperty[]> => {
+      const PAGE = 100;
+      const first = await get<TokkoListResponse>('property', {
+        limit: String(PAGE), offset: '0', only_recents: 'false',
+      });
+      const total = first.meta.total_count;
+      const all: TokkoProperty[] = [...first.objects];
+
+      if (total > PAGE) {
+        const pages = Math.ceil((total - PAGE) / PAGE);
+        const rest = await Promise.all(
+          Array.from({ length: pages }, (_, i) =>
+            get<TokkoListResponse>('property', { limit: String(PAGE), offset: String((i + 1) * PAGE) })
+          )
+        );
+        rest.forEach(r => all.push(...r.objects));
+      }
+
+      const result = all.map(normalize);
+      setCache(result);
+      return result;
+    };
+
+    // Stale cache: return it immediately and refresh in background
+    if (cached?.stale) {
+      fetchFresh().catch(console.error);
+      return cached.data;
     }
 
-    const PAGE = 100;
-    const first = await get<TokkoListResponse>('property', { limit: String(PAGE), offset: '0' });
-    const total = first.meta.total_count;
-    const all: TokkoProperty[] = [...first.objects];
-
-    // Fetch remaining pages in parallel
-    if (total > PAGE) {
-      const pages = Math.ceil((total - PAGE) / PAGE);
-      const rest = await Promise.all(
-        Array.from({ length: pages }, (_, i) =>
-          get<TokkoListResponse>('property', { limit: String(PAGE), offset: String((i + 1) * PAGE) })
-        )
-      );
-      rest.forEach(r => all.push(...r.objects));
-    }
-
-    const result = all.map(normalize);
-    setCache(result);
-    return result;
+    // No cache: must wait for fresh data
+    return fetchFresh();
   },
 
   /** Fetch single property by ID */

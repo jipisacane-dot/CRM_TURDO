@@ -75,7 +75,7 @@ export default function Login() {
             </div>
 
             {error && (
-              <div className="bg-red-900/30 border border-red-800/50 rounded-lg px-4 py-2.5 text-red-400 text-sm">
+              <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-2.5 text-red-600 text-sm">
                 {error}
               </div>
             )}

@@ -7,6 +7,8 @@ const supabase = createClient(
 
 const FB_TOKEN = Deno.env.get('FB_PAGE_ACCESS_TOKEN')!;
 const WA_TOKEN = Deno.env.get('WHATSAPP_TOKEN') ?? Deno.env.get('FB_PAGE_ACCESS_TOKEN')!;
+const IG_TOKEN = Deno.env.get('INSTAGRAM_TOKEN') ?? Deno.env.get('FB_PAGE_ACCESS_TOKEN')!;
+const IG_BUSINESS_ID = Deno.env.get('IG_BUSINESS_ACCOUNT_ID') ?? 'me';
 const MANYCHAT_KEY = Deno.env.get('MANYCHAT_API_KEY')!;
 const WA_PHONE_NUMBER_ID = Deno.env.get('WHATSAPP_PHONE_NUMBER_ID');
 
@@ -29,13 +31,29 @@ async function getMCSubscriber(subscriberId: string): Promise<Record<string, unk
   } catch { return null; }
 }
 
-// Send via Meta Instagram Messaging API (requires instagram_manage_messages token)
+// Send via Instagram Business Messaging API
 async function sendInstagramMessage(igPsid: string, text: string): Promise<{ ok: boolean; error?: string }> {
+  const resp = await fetch(`https://graph.facebook.com/v20.0/${IG_BUSINESS_ID}/messages`, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${IG_TOKEN}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      recipient: { id: igPsid },
+      message: { text },
+      messaging_type: 'RESPONSE',
+    }),
+  });
+  const result = await resp.json();
+  if (!resp.ok) return { ok: false, error: JSON.stringify(result) };
+  return { ok: true };
+}
+
+// Send via Facebook Page Messaging API
+async function sendFacebookMessage(psid: string, text: string): Promise<{ ok: boolean; error?: string }> {
   const resp = await fetch('https://graph.facebook.com/v20.0/me/messages', {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${FB_TOKEN}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      recipient: { id: igPsid },
+      recipient: { id: psid },
       message: { text },
       messaging_type: 'RESPONSE',
     }),
@@ -192,7 +210,7 @@ Deno.serve(async (req) => {
 
   } else if (contact.channel === 'facebook' && contact.channel_id) {
     // Facebook Messenger — use Meta Graph API directly (token has pages_messaging)
-    const result = await sendInstagramMessage(contact.channel_id, content);
+    const result = await sendFacebookMessage(contact.channel_id, content);
     if (result.ok) {
       deliveryMethod = 'meta_messenger'; deliveryOk = true;
     } else {

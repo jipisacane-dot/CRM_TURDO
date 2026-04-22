@@ -4,43 +4,58 @@
 @tailwind components;
 @tailwind utilities;
 
-* { box-sizing: border-box; }
+/* ── Force light color scheme ─────────────────────────────── */
+:root {
+  color-scheme: light;
+}
 
-body {
-  margin: 0;
-  background: #F8F9FB;
-  color: #0F172A;
+html, body {
+  background: #F8F9FB !important;
+  color: #0F172A !important;
   font-family: 'Inter', system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  margin: 0;
 }
 
-#root { width: 100%; min-height: 100vh; }
+* { box-sizing: border-box; }
 
-::-webkit-scrollbar { width: 5px; height: 5px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #D1D9E6; border-radius: 4px; }
-::-webkit-scrollbar-thumb:hover { background: #8B1F1F; }
+#root { width: 100%; min-height: 100vh; background: #F8F9FB; }
 
-/* Remap text-white to dark on light theme */
+/* ── Force background classes regardless of Tailwind cache ── */
+.bg-bg-main  { background-color: #F8F9FB !important; }
+.bg-bg-card  { background-color: #FFFFFF !important; }
+.bg-bg-input { background-color: #F1F3F7 !important; }
+.bg-bg-hover { background-color: #F1F3F7 !important; }
+
+/* ── Sidebar and main layout ──────────────────────────────── */
+aside { background-color: #FFFFFF !important; }
+main  { background-color: #F8F9FB !important; }
+
+/* ── Remap text-white to dark on light theme ──────────────── */
 .text-white { color: #0F172A !important; }
 .hover\:text-white:hover { color: #0F172A !important; }
 
-/* Preserve white text on crimson backgrounds */
+/* Preserve white text ON crimson backgrounds */
 .bg-crimson.text-white,
 .bg-crimson-bright.text-white,
-.bg-crimson-light.text-white,
 [class*="bg-crimson"].text-white { color: #ffffff !important; }
 .bg-crimson .text-white,
-.bg-crimson-bright .text-white,
-.bg-crimson-light .text-white { color: #ffffff !important; }
+.bg-crimson-bright .text-white   { color: #ffffff !important; }
 
-/* Gray text remapping */
+/* ── Gray text remapping ──────────────────────────────────── */
 .text-gray-200 { color: #475569 !important; }
 .text-gray-300 { color: #64748B !important; }
 .text-gray-600 { color: #475569 !important; }
 .text-gray-900 { color: #0F172A !important; }
 
+/* ── Scrollbar ────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #D1D9E6; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #8B1F1F; }
+
+/* ── Line clamp ───────────────────────────────────────────── */
 .line-clamp-1 {
   overflow: hidden;
   display: -webkit-box;

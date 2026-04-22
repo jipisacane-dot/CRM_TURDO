@@ -4,6 +4,7 @@ import { tokko, type CRMProperty } from '../services/tokko';
 interface State {
   properties: CRMProperty[];
   loading: boolean;
+  refreshing: boolean; // background refresh (stale data shown)
   error: string | null;
   lastFetch: Date | null;
 }
@@ -12,6 +13,7 @@ export const useTokkoProperties = () => {
   const [state, setState] = useState<State>({
     properties: [],
     loading: false,
+    refreshing: false,
     error: null,
     lastFetch: null,
   });
@@ -21,12 +23,20 @@ export const useTokkoProperties = () => {
       setState(s => ({ ...s, error: 'API key de Tokko no configurada. Creá el archivo .env.local con VITE_TOKKO_KEY=tu_key' }));
       return;
     }
-    setState(s => ({ ...s, loading: true, error: null }));
+
+    // If we already have data, show refreshing indicator instead of blocking spinner
+    setState(s => ({
+      ...s,
+      loading: s.properties.length === 0,
+      refreshing: s.properties.length > 0,
+      error: null,
+    }));
+
     try {
       const properties = await tokko.getProperties(force);
-      setState({ properties, loading: false, error: null, lastFetch: new Date() });
+      setState({ properties, loading: false, refreshing: false, error: null, lastFetch: new Date() });
     } catch (e) {
-      setState(s => ({ ...s, loading: false, error: (e as Error).message }));
+      setState(s => ({ ...s, loading: false, refreshing: false, error: (e as Error).message }));
     }
   }, []);
 

@@ -14,9 +14,9 @@ const formatPrice = (price: number, currency: string) => {
 };
 
 const statusCfg = {
-  active:   { label: 'Activa',     color: 'bg-green-900/50 text-green-400' },
-  reserved: { label: 'Reservada',  color: 'bg-yellow-900/50 text-yellow-400' },
-  sold:     { label: 'Vendida',    color: 'bg-gray-700 text-gray-400' },
+  active:   { label: 'Activa',     color: 'bg-green-100 text-green-700' },
+  reserved: { label: 'Reservada',  color: 'bg-yellow-100 text-yellow-700' },
+  sold:     { label: 'Vendida',    color: 'bg-gray-100 text-gray-500' },
 };
 
 const opColor = {
@@ -90,7 +90,7 @@ const PropertyCard = ({ prop, onClick }: { prop: CRMProperty; onClick: () => voi
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function Properties() {
-  const { properties, loading, error, lastFetch, refetch } = useTokkoProperties();
+  const { properties, loading, refreshing, error, lastFetch, refetch } = useTokkoProperties();
   const [search, setSearch] = useState('');
   const [opFilter, setOpFilter] = useState('all');
   const [typeFilter, setTypeFilter] = useState('all');
@@ -136,26 +136,27 @@ export default function Properties() {
           <h1 className="text-2xl font-bold text-white">Propiedades</h1>
           <p className="text-muted text-sm mt-0.5">
             {loading ? 'Cargando desde Tokko...' : `${filtered.length} de ${properties.length} propiedades`}
-            {lastFetch && !loading && <span className="ml-2">· actualizado {lastFetch.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}</span>}
+            {refreshing && <span className="ml-2 text-crimson-bright animate-pulse">· actualizando...</span>}
+            {lastFetch && !loading && !refreshing && <span className="ml-2">· actualizado {lastFetch.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}</span>}
           </p>
         </div>
         <button
           onClick={refetch}
-          disabled={loading}
-          className="flex items-center gap-2 text-sm bg-bg-card border border-border rounded-xl px-4 py-2 text-white hover:border-crimson transition-all disabled:opacity-50"
+          disabled={loading || refreshing}
+          className="flex items-center gap-2 text-sm bg-bg-card border border-border rounded-xl px-4 py-2 text-gray-700 hover:border-crimson transition-all disabled:opacity-50"
         >
-          <span className={loading ? 'animate-spin' : ''}>↻</span>
-          {loading ? 'Sincronizando...' : 'Sincronizar Tokko'}
+          <span className={(loading || refreshing) ? 'animate-spin' : ''}>↻</span>
+          {loading ? 'Sincronizando...' : refreshing ? 'Actualizando...' : 'Sincronizar Tokko'}
         </button>
       </div>
 
       {/* Error state */}
       {error && (
-        <div className="bg-red-900/20 border border-red-800/50 rounded-2xl p-5">
-          <div className="text-red-400 font-medium mb-1">⚠ Error conectando con Tokko</div>
-          <div className="text-red-400/70 text-sm">{error}</div>
+        <div className="bg-red-50 border border-red-200 rounded-2xl p-5">
+          <div className="text-red-600 font-medium mb-1">⚠ Error conectando con Tokko</div>
+          <div className="text-red-500 text-sm">{error}</div>
           {error.includes('.env') && (
-            <div className="mt-3 bg-black/30 rounded-xl p-3 font-mono text-xs text-green-400">
+            <div className="mt-3 bg-gray-100 rounded-xl p-3 font-mono text-xs text-green-700">
               <div># Crear archivo C:\turdo\CRM_TURDO\.env.local</div>
               <div>VITE_TOKKO_KEY=tu_api_key_aquí</div>
             </div>
@@ -179,7 +180,7 @@ export default function Properties() {
         </div>
       )}
 
-      {!loading && properties.length > 0 && (
+      {(refreshing || (!loading && properties.length > 0)) && (
         <>
           {/* Summary stats */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
