@@ -47,11 +47,7 @@ export default function Inbox() {
     .filter(l => !search || l.name.toLowerCase().includes(search.toLowerCase()) || (l.propertyTitle ?? '').toLowerCase().includes(search.toLowerCase()))
     .sort((a, b) => new Date(b.lastActivity).getTime() - new Date(a.lastActivity).getTime());
 
-  const selected = leads.find(l => l.id === selectedId) ?? filtered[0] ?? null;
-
-  useEffect(() => {
-    if (selected && selectedId !== selected.id) setSelectedId(selected.id);
-  }, []);
+  const selected = selectedId ? (leads.find(l => l.id === selectedId) ?? null) : null;
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -69,7 +65,7 @@ export default function Inbox() {
   const assignedAgent = selected?.assignedTo ? AGENTS.find(a => a.id === selected.assignedTo) : null;
 
   return (
-    <div className="flex h-screen md:h-[calc(100vh)] overflow-hidden">
+    <div className="flex h-screen md:h-[calc(100vh)] overflow-hidden bg-bg-main">
       {/* Conversation list */}
       <div className={`flex flex-col w-full md:w-80 lg:w-96 border-r border-border bg-bg-card flex-shrink-0 ${selectedId ? 'hidden md:flex' : 'flex'}`}>
         {/* Due reminders banner */}
@@ -171,7 +167,7 @@ export default function Inbox() {
 
       {/* Chat window */}
       {selected ? (
-        <div className={`flex-1 flex flex-col min-w-0 ${!selectedId ? 'hidden md:flex' : 'flex'}`}>
+        <div className="flex-1 flex flex-col min-w-0">
           {/* Header */}
           <div className="flex items-center gap-3 px-4 py-3 border-b border-border bg-bg-card flex-shrink-0">
             <button onClick={() => setSelectedId(null)} className="md:hidden text-muted hover:text-white mr-1">←</button>
