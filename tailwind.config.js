@@ -5,19 +5,22 @@ export default {
     extend: {
       colors: {
         bg: {
-          main: "#0D0D0D",
-          card: "#181818",
-          input: "#222222",
-          hover: "#1F1F1F",
+          main:  "#F8F9FB",
+          card:  "#FFFFFF",
+          input: "#F1F3F7",
+          hover: "#F1F3F7",
         },
         crimson: {
           DEFAULT: "#8B1F1F",
-          light: "#A52525",
-          bright: "#C42E2E",
-          50: "#FFF0F0",
+          light:   "#A52525",
+          bright:  "#C42E2E",
+          50:      "#FFF0F0",
         },
-        border: "#2E2E2E",
-        muted: "#666666",
+        border: "#E4E7EF",
+        muted:  "#8492A6",
+      },
+      fontFamily: {
+        sans: ['Inter', 'system-ui', 'sans-serif'],
       },
     },
   },

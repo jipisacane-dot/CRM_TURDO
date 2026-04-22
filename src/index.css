@@ -4,37 +4,42 @@
 
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 
-* {
-  box-sizing: border-box;
-}
+* { box-sizing: border-box; }
 
 body {
   margin: 0;
-  background: #0D0D0D;
-  color: #FFFFFF;
+  background: #F8F9FB;
+  color: #0F172A;
   font-family: 'Inter', system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-#root {
-  width: 100%;
-  min-height: 100vh;
-}
+#root { width: 100%; min-height: 100vh; }
 
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-::-webkit-scrollbar-track {
-  background: #111;
-}
-::-webkit-scrollbar-thumb {
-  background: #333;
-  border-radius: 3px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: #8B1F1F;
-}
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #D1D9E6; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #8B1F1F; }
+
+/* Remap text-white to dark on light theme */
+.text-white { color: #0F172A !important; }
+.hover\:text-white:hover { color: #0F172A !important; }
+
+/* Preserve white text on crimson backgrounds */
+.bg-crimson.text-white,
+.bg-crimson-bright.text-white,
+.bg-crimson-light.text-white,
+[class*="bg-crimson"].text-white { color: #ffffff !important; }
+.bg-crimson .text-white,
+.bg-crimson-bright .text-white,
+.bg-crimson-light .text-white { color: #ffffff !important; }
+
+/* Gray text remapping */
+.text-gray-200 { color: #475569 !important; }
+.text-gray-300 { color: #64748B !important; }
+.text-gray-600 { color: #475569 !important; }
+.text-gray-900 { color: #0F172A !important; }
 
 .line-clamp-1 {
   overflow: hidden;

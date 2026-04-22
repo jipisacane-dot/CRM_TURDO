@@ -1,20 +1,20 @@
 import type { LeadStatus } from '../../types';
 
 const cfg: Record<LeadStatus, { label: string; color: string; bg: string }> = {
-  new:       { label: 'Nuevo',       color: '#60A5FA', bg: '#60A5FA15' },
-  contacted: { label: 'Contactado',  color: '#A78BFA', bg: '#A78BFA15' },
-  qualified: { label: 'Calificado',  color: '#F59E0B', bg: '#F59E0B15' },
-  proposal:  { label: 'Propuesta',   color: '#F97316', bg: '#F9731615' },
-  visit:     { label: 'Visita',      color: '#06B6D4', bg: '#06B6D415' },
-  won:       { label: 'Cerrado ✓',   color: '#22C55E', bg: '#22C55E15' },
-  lost:      { label: 'Perdido',     color: '#EF4444', bg: '#EF444415' },
+  new:       { label: 'Nuevo',      color: '#1D4ED8', bg: '#EFF6FF' },
+  contacted: { label: 'Contactado', color: '#6D28D9', bg: '#F5F3FF' },
+  qualified: { label: 'Calificado', color: '#B45309', bg: '#FFFBEB' },
+  proposal:  { label: 'Propuesta',  color: '#C2410C', bg: '#FFF7ED' },
+  visit:     { label: 'Visita',     color: '#0E7490', bg: '#ECFEFF' },
+  won:       { label: 'Cerrado',    color: '#166534', bg: '#F0FDF4' },
+  lost:      { label: 'Perdido',    color: '#991B1B', bg: '#FEF2F2' },
 };
 
 export const StatusBadge = ({ status }: { status: LeadStatus }) => {
   const s = cfg[status];
   return (
     <span
-      className="inline-block px-2 py-0.5 rounded-full text-xs font-medium"
+      className="inline-block px-2 py-0.5 rounded text-[11px] font-medium tracking-wide"
       style={{ color: s.color, background: s.bg }}
     >
       {s.label}
