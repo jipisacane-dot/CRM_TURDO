@@ -5,6 +5,7 @@ import { ChannelIcon, channelLabel } from '../components/ui/ChannelIcon';
 import { StatusBadge } from '../components/ui/StatusBadge';
 import { Avatar } from '../components/ui/Avatar';
 import { Modal } from '../components/ui/Modal';
+import { ReminderModal } from '../components/ui/ReminderModal';
 import type { Channel, Lead } from '../types';
 import { formatDistanceToNow, format } from 'date-fns';
 import { es } from 'date-fns/locale';
@@ -32,11 +33,12 @@ function LeadAvatar({ lead, size = 'md' }: { lead: Lead; size?: 'sm' | 'md' }) {
 const ALL_CHANNELS: (Channel | 'all')[] = ['all', 'whatsapp', 'instagram', 'facebook', 'email', 'web', 'zonaprop', 'argenprop'];
 
 export default function Inbox() {
-  const { leads, assignLead, sendMessage, loading } = useApp();
+  const { leads, assignLead, sendMessage, loading, dueReminders, completeReminder } = useApp();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [channelFilter, setChannelFilter] = useState<Channel | 'all'>('all');
   const [reply, setReply] = useState('');
   const [showAssign, setShowAssign] = useState(false);
+  const [showReminder, setShowReminder] = useState(false);
   const [search, setSearch] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -69,9 +71,41 @@ export default function Inbox() {
   return (
     <div className="flex h-screen md:h-[calc(100vh)] overflow-hidden">
       {/* Conversation list */}
-      <div className={`flex flex-col w-full md:w-80 lg:w-96 border-r border-border bg-bg-card flex-shrink-0 ${selected ? 'hidden md:flex' : 'flex'}`}>
+      <div className={`flex flex-col w-full md:w-80 lg:w-96 border-r border-border bg-bg-card flex-shrink-0 ${selectedId ? 'hidden md:flex' : 'flex'}`}>
+        {/* Due reminders banner */}
+        {dueReminders.length > 0 && (
+          <div className="border-b border-border">
+            {dueReminders.map(r => {
+              const lead = leads.find(l => l.id === r.contact_id);
+              return (
+                <div key={r.id} className="flex items-start gap-2 px-4 py-3 bg-amber-50 border-b border-amber-100 last:border-b-0">
+                  <span className="text-amber-500 text-base mt-0.5 flex-shrink-0">🔔</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium text-amber-800">{r.title}</div>
+                    {lead && (
+                      <button
+                        onClick={() => setSelectedId(lead.id)}
+                        className="text-xs text-amber-600 hover:underline truncate"
+                      >
+                        {lead.name}
+                      </button>
+                    )}
+                    {r.note && <div className="text-xs text-amber-600 mt-0.5">{r.note}</div>}
+                  </div>
+                  <button
+                    onClick={() => completeReminder(r.id)}
+                    className="text-amber-400 hover:text-amber-600 text-xs flex-shrink-0 mt-0.5 px-2 py-1 rounded-lg hover:bg-amber-100 transition-all"
+                  >
+                    ✓ Listo
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
         <div className="p-4 border-b border-border space-y-3">
-          <h2 className="text-white font-semibold text-lg">Bandeja</h2>
+          <h2 className="text-gray-900 font-semibold text-lg">Bandeja</h2>
           <input
             value={search}
             onChange={e => setSearch(e.target.value)}
@@ -137,7 +171,7 @@ export default function Inbox() {
 
       {/* Chat window */}
       {selected ? (
-        <div className={`flex-1 flex flex-col min-w-0 ${!selectedId && selected ? 'hidden md:flex' : 'flex'}`}>
+        <div className="flex-1 flex flex-col min-w-0">
           {/* Header */}
           <div className="flex items-center gap-3 px-4 py-3 border-b border-border bg-bg-card flex-shrink-0">
             <button onClick={() => setSelectedId(null)} className="md:hidden text-muted hover:text-white mr-1">←</button>
@@ -152,8 +186,15 @@ export default function Inbox() {
             <div className="flex items-center gap-2 flex-shrink-0">
               <StatusBadge status={selected.status} />
               <button
+                onClick={() => setShowReminder(true)}
+                title="Crear recordatorio"
+                className="text-lg hover:scale-110 transition-transform"
+              >
+                🔔
+              </button>
+              <button
                 onClick={() => setShowAssign(true)}
-                className="text-xs bg-bg-input hover:bg-bg-hover border border-border rounded-lg px-3 py-1.5 text-white transition-all"
+                className="text-xs bg-bg-input hover:bg-bg-hover border border-border rounded-lg px-3 py-1.5 text-gray-700 transition-all"
               >
                 {assignedAgent ? assignedAgent.name.split(' ')[0] : '+ Asignar'}
               </button>
@@ -212,6 +253,15 @@ export default function Inbox() {
             <p>Seleccioná una conversación</p>
           </div>
         </div>
+      )}
+
+      {/* Reminder modal */}
+      {selected && (
+        <ReminderModal
+          open={showReminder}
+          onClose={() => setShowReminder(false)}
+          lead={selected}
+        />
       )}
 
       {/* Assign modal */}

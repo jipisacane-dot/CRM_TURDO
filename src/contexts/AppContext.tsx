@@ -1,7 +1,7 @@
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react';
 import type { Lead, Agent } from '../types';
 import { AGENTS } from '../data/mock';
-import { db, supabase, type DBContact, type DBMessage } from '../services/supabase';
+import { db, supabase, type DBContact, type DBMessage, type DBReminder } from '../services/supabase';
 
 // ── Convert Supabase rows → CRM Lead type ─────────────────────────────────────
 
@@ -45,6 +45,10 @@ interface AppContextType {
   updateLeadStatus: (leadId: string, status: Lead['status']) => Promise<void>;
   sendMessage: (leadId: string, content: string) => Promise<void>;
   unreadCount: number;
+  dueReminders: DBReminder[];
+  createReminder: (contactId: string, title: string, dueAt: string, note?: string) => Promise<void>;
+  completeReminder: (id: string) => Promise<void>;
+  refreshReminders: () => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType | null>(null);
@@ -52,19 +56,14 @@ const AppContext = createContext<AppContextType | null>(null);
 export const AppProvider = ({ children }: { children: ReactNode }) => {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [loading, setLoading] = useState(true);
+  const [dueReminders, setDueReminders] = useState<DBReminder[]>([]);
   const currentUser = AGENTS.find(a => a.id === 'leticia')!;
 
   const refreshLeads = useCallback(async () => {
     setLoading(true);
     try {
-      const contacts = await db.contacts.list();
-      const leadsWithMessages = await Promise.all(
-        contacts.map(async c => {
-          const messages = await db.messages.forContact(c.id);
-          return toLead(c, messages);
-        })
-      );
-      setLeads(leadsWithMessages);
+      const contacts = await db.contacts.listWithMessages();
+      setLeads(contacts.map(c => toLead(c, c.messages)));
     } catch (e) {
       console.error('Error cargando leads:', e);
     } finally {
@@ -72,8 +71,40 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     }
   }, []);
 
+  const refreshReminders = useCallback(async () => {
+    try {
+      const due = await db.reminders.listDue();
+      setDueReminders(due);
+    } catch (e) {
+      console.error('Error cargando recordatorios:', e);
+    }
+  }, []);
+
+  const createReminder = async (contactId: string, title: string, dueAt: string, note?: string) => {
+    await db.reminders.create({
+      contact_id: contactId,
+      title,
+      due_at: dueAt,
+      note: note ?? null,
+      done: false,
+      agent_id: currentUser.id,
+    });
+    await refreshReminders();
+  };
+
+  const completeReminder = async (id: string) => {
+    await db.reminders.complete(id);
+    setDueReminders(prev => prev.filter(r => r.id !== id));
+  };
+
   // Load on mount
-  useEffect(() => { refreshLeads(); }, [refreshLeads]);
+  useEffect(() => { refreshLeads(); refreshReminders(); }, [refreshLeads, refreshReminders]);
+
+  // Check reminders every 5 min
+  useEffect(() => {
+    const interval = setInterval(refreshReminders, 5 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, [refreshReminders]);
 
   // Realtime subscription — update only the affected contact
   useEffect(() => {
@@ -152,7 +183,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     sum + lead.messages.filter(m => !m.read && m.direction === 'in').length, 0);
 
   return (
-    <AppContext.Provider value={{ currentUser, leads, loading, refreshLeads, assignLead, updateLeadStatus, sendMessage, unreadCount }}>
+    <AppContext.Provider value={{ currentUser, leads, loading, refreshLeads, assignLead, updateLeadStatus, sendMessage, unreadCount, dueReminders, createReminder, completeReminder, refreshReminders }}>
       {children}
     </AppContext.Provider>
   );
