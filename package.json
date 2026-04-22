@@ -10,13 +10,16 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@resvg/resvg-js": "^2.6.2",
     "@supabase/supabase-js": "^2.104.0",
     "date-fns": "^4.1.0",
     "lucide-react": "^1.8.0",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
+    "react-is": "^19.2.5",
     "react-router-dom": "^7.14.1",
-    "recharts": "^3.8.1"
+    "recharts": "^3.8.1",
+    "vite-plugin-pwa": "^1.2.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",

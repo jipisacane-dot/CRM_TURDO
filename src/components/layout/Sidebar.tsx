@@ -56,7 +56,7 @@ export const Sidebar = () => {
   const { unreadCount, dueReminders } = useApp();
   const navigate = useNavigate();
   const { status: pushStatus, loading: pushLoading, subscribe, unsubscribe } = usePushNotifications();
-  const { needRefresh, updateServiceWorker } = useRegisterSW();
+  const { needRefresh: [needRefresh], updateServiceWorker } = useRegisterSW();
 
   const handleLogout = () => {
     localStorage.removeItem('crm_session');
