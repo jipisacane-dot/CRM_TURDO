@@ -33,16 +33,21 @@ function LeadAvatar({ lead, size = 'md' }: { lead: Lead; size?: 'sm' | 'md' }) {
 const ALL_CHANNELS: (Channel | 'all')[] = ['all', 'whatsapp', 'instagram', 'facebook', 'email', 'web', 'zonaprop', 'argenprop'];
 
 export default function Inbox() {
-  const { leads, assignLead, sendMessage, loading, dueReminders, completeReminder } = useApp();
+  const { leads, assignLead, sendMessage, loading, dueReminders, completeReminder, currentUser } = useApp();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [channelFilter, setChannelFilter] = useState<Channel | 'all'>('all');
   const [reply, setReply] = useState('');
   const [showAssign, setShowAssign] = useState(false);
   const [showReminder, setShowReminder] = useState(false);
   const [search, setSearch] = useState('');
+  const [sendError, setSendError] = useState<string | null>(null);
+  const [sending, setSending] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const filtered = leads
+  const isAdmin = currentUser.role === 'admin';
+  const scope = isAdmin ? leads : leads.filter(l => l.assignedTo === currentUser.id);
+
+  const filtered = scope
     .filter(l => channelFilter === 'all' || l.channel === channelFilter)
     .filter(l => !search || l.name.toLowerCase().includes(search.toLowerCase()) || (l.propertyTitle ?? '').toLowerCase().includes(search.toLowerCase()))
     .sort((a, b) => new Date(b.lastActivity).getTime() - new Date(a.lastActivity).getTime());
@@ -54,10 +59,20 @@ export default function Inbox() {
   }, [selected?.messages.length]);
 
   const handleSend = async () => {
-    if (!reply.trim() || !selected) return;
+    if (!reply.trim() || !selected || sending) return;
     const text = reply.trim();
     setReply('');
-    await sendMessage(selected.id, text);
+    setSendError(null);
+    setSending(true);
+    const result = await sendMessage(selected.id, text);
+    setSending(false);
+    if (!result.ok) {
+      if (result.outside_window) {
+        setSendError('Pasaron más de 24hs desde el último mensaje del contacto. WhatsApp e Instagram solo permiten responder dentro de ese período. Pedile al contacto que te escriba primero.');
+      } else {
+        setSendError('No se pudo enviar el mensaje. Revisá que el contacto esté activo en el canal.');
+      }
+    }
   };
 
   const unreadInLead = (lead: Lead) => lead.messages.filter(m => !m.read && m.direction === 'in').length;
@@ -65,7 +80,7 @@ export default function Inbox() {
   const assignedAgent = selected?.assignedTo ? AGENTS.find(a => a.id === selected.assignedTo) : null;
 
   return (
-    <div className="flex h-screen md:h-[calc(100vh)] overflow-hidden" style={{ background: '#F8F9FB' }}>
+    <div className="flex h-[calc(100dvh-5rem)] md:h-screen overflow-hidden" style={{ background: '#F8F9FB' }}>
       {/* Conversation list */}
       <div className={`flex flex-col w-full md:w-80 lg:w-96 border-r border-border bg-bg-card flex-shrink-0 ${selectedId ? 'hidden md:flex' : 'flex'}`}>
         {/* Due reminders banner */}
@@ -180,17 +195,18 @@ export default function Inbox() {
               </div>
             </div>
             <div className="flex items-center gap-2 flex-shrink-0">
-              <StatusBadge status={selected.status} />
+              <div className="hidden sm:block"><StatusBadge status={selected.status} /></div>
               <button
                 onClick={() => setShowReminder(true)}
                 title="Crear recordatorio"
-                className="text-lg hover:scale-110 transition-transform"
+                aria-label="Crear recordatorio"
+                className="text-lg hover:scale-110 transition-transform p-1"
               >
                 🔔
               </button>
               <button
                 onClick={() => setShowAssign(true)}
-                className="text-xs bg-bg-input hover:bg-bg-hover border border-border rounded-lg px-3 py-1.5 text-gray-700 transition-all"
+                className="text-xs bg-bg-input hover:bg-bg-hover border border-border rounded-lg px-3 py-1.5 text-gray-700 transition-all whitespace-nowrap"
               >
                 {assignedAgent ? assignedAgent.name.split(' ')[0] : '+ Asignar'}
               </button>
@@ -223,10 +239,17 @@ export default function Inbox() {
 
           {/* Reply input */}
           <div className="border-t border-border p-4 bg-bg-card flex-shrink-0">
+            {sendError && (
+              <div className="mb-3 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-600 flex items-start gap-2">
+                <span className="flex-shrink-0 mt-0.5">⚠</span>
+                <span>{sendError}</span>
+                <button onClick={() => setSendError(null)} className="ml-auto flex-shrink-0 text-red-400 hover:text-red-600">✕</button>
+              </div>
+            )}
             <div className="flex gap-2 items-end">
               <textarea
                 value={reply}
-                onChange={e => setReply(e.target.value)}
+                onChange={e => { setReply(e.target.value); if (sendError) setSendError(null); }}
                 onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }}}
                 placeholder={`Responder por ${channelLabel(selected.channel)}...`}
                 rows={2}
@@ -234,10 +257,10 @@ export default function Inbox() {
               />
               <button
                 onClick={handleSend}
-                disabled={!reply.trim()}
+                disabled={!reply.trim() || sending}
                 className="bg-crimson hover:bg-crimson-light text-white px-4 py-3 rounded-xl text-sm font-medium transition-all disabled:opacity-40"
               >
-                Enviar
+                {sending ? '...' : 'Enviar'}
               </button>
             </div>
           </div>

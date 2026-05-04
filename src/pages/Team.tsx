@@ -27,7 +27,7 @@ const AgentCard = ({ agent, leads, onClick }: { agent: Agent; leads: number; onC
     <div onClick={onClick} className="bg-bg-card border border-border rounded-2xl p-5 cursor-pointer hover:border-crimson/50 transition-all group">
       <div className="flex items-start justify-between mb-4">
         <div className="flex items-center gap-3">
-          <Avatar initials={agent.avatar} size="lg" online={Math.random() > 0.4} />
+          <Avatar initials={agent.avatar} imageUrl={agent.imageUrl} size="lg" online={Math.random() > 0.4} />
           <div>
             <div className="text-white font-semibold group-hover:text-crimson-bright transition-colors">{agent.name}</div>
             <div className="text-muted text-xs mt-0.5">{agent.branch}</div>
@@ -154,7 +154,7 @@ export default function Team() {
         {detailAgent && (
           <div className="space-y-5">
             <div className="flex items-center gap-4">
-              <Avatar initials={detailAgent.avatar} size="lg" />
+              <Avatar initials={detailAgent.avatar} imageUrl={detailAgent.imageUrl} size="lg" />
               <div>
                 <div className="text-white font-bold text-lg">{detailAgent.name}</div>
                 <div className="text-muted text-sm">{detailAgent.branch}</div>

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { AGENTS } from '../data/mock';
 
 const TurdoLogoFull = () => (
   <div className="flex flex-col items-center gap-4 mb-10">
@@ -29,11 +30,12 @@ export default function Login() {
     setError('');
     if (!email || !password) { setError('Completá todos los campos'); return; }
     setLoading(true);
-    // Simple hardcoded auth for demo — replace with Supabase Auth when ready
     await new Promise(r => setTimeout(r, 600));
     setLoading(false);
     if (password === 'turdo2024' || password === '1234') {
-      const session = { email, exp: Date.now() + 8 * 60 * 60 * 1000 };
+      const agent = AGENTS.find(a => a.email.toLowerCase() === email.toLowerCase());
+      const agentId = agent?.id ?? 'leticia';
+      const session = { email, agentId, exp: Date.now() + 8 * 60 * 60 * 1000 };
       localStorage.setItem('crm_session', JSON.stringify(session));
       navigate('/');
     } else {

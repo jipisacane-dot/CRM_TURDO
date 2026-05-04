@@ -2,7 +2,14 @@ import { useState, useEffect } from 'react';
 import { supabase } from '../services/supabase';
 
 const VAPID_PUBLIC = import.meta.env.VITE_VAPID_PUBLIC_KEY as string;
-const AGENT_ID = 'leticia'; // will come from auth when multi-user is implemented
+
+function getSessionAgentId(): string {
+  try {
+    const raw = localStorage.getItem('crm_session');
+    if (!raw) return 'leticia';
+    return (JSON.parse(raw) as { agentId?: string }).agentId ?? 'leticia';
+  } catch { return 'leticia'; }
+}
 
 function urlBase64ToUint8Array(base64String: string): ArrayBuffer {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
@@ -55,7 +62,7 @@ export const usePushNotifications = () => {
       const authStr = btoa(String.fromCharCode(...new Uint8Array(auth)));
 
       await supabase.from('push_subscriptions').upsert(
-        { agent_id: AGENT_ID, endpoint: sub.endpoint, p256dh, auth: authStr },
+        { agent_id: getSessionAgentId(), endpoint: sub.endpoint, p256dh, auth: authStr },
         { onConflict: 'endpoint' }
       );
 

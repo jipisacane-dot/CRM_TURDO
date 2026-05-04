@@ -56,7 +56,6 @@ Deno.serve(async (req) => {
           {
             channel_id: senderId,
             channel: 'instagram',
-            ig_psid: senderId,
             name: 'Sin nombre',
             status: 'new',
             branch: 'Sucursal Centro',
@@ -86,19 +85,14 @@ Deno.serve(async (req) => {
         { onConflict: 'meta_mid', ignoreDuplicates: true }
       );
 
-      // Update ig_psid on contact so send-message can use it directly
-      await supabase
-        .from('contacts')
-        .update({ ig_psid: senderId })
-        .eq('id', contact.id);
-
-      // Push notification
+      // Push notification — targeted to assigned agent if any
       supabase.functions.invoke('send-push', {
         body: {
           title: contact.name ?? 'Instagram',
           body: text.slice(0, 100),
           contact_id: contact.id,
           url: '/inbox',
+          agent_id: (contact as Record<string, unknown>).assigned_to ?? undefined,
         },
       }).catch(console.error);
     }

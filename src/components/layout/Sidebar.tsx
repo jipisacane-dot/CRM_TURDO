@@ -20,18 +20,36 @@ const ICONS = {
   bell:      'M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0',
   logout:    'M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9',
   refresh:   'M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15',
+  operations:'M3 3h18v4H3zM3 11h18v4H3zM3 19h18v2H3z',
+  money:     'M12 1v22M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6',
+  wallet:    'M21 12V7H5a2 2 0 0 1 0-4h14v4M3 5v14a2 2 0 0 0 2 2h16v-5M18 12a2 2 0 0 0 0 4h4v-4Z',
+  finanzas:  'M12 2v20M5 9h14a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2zM3 9V7a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v2',
+  alarm:     'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 7v5l3 3M5 3 2 6M19 3l3 3',
 };
 
-const NAV = [
-  { to: '/',           iconKey: 'dashboard',   label: 'Dashboard'  },
-  { to: '/inbox',      iconKey: 'inbox',       label: 'Bandeja'    },
-  { to: '/contacts',   iconKey: 'contacts',    label: 'Contactos'  },
-  { to: '/leads',      iconKey: 'leads',       label: 'Consultas'  },
-  { to: '/properties', iconKey: 'properties',  label: 'Propiedades'},
-  { to: '/team',       iconKey: 'team',        label: 'Equipo'     },
-  { to: '/calendar',   iconKey: 'calendar',    label: 'Calendario' },
-  { to: '/analytics',  iconKey: 'analytics',   label: 'Analíticas' },
-] as const;
+type NavItem = {
+  to: string;
+  iconKey: keyof typeof ICONS;
+  label: string;
+  adminOnly?: boolean;
+  agentOnly?: boolean;
+};
+
+const NAV: NavItem[] = [
+  { to: '/',                iconKey: 'dashboard',   label: 'Dashboard'   },
+  { to: '/inbox',           iconKey: 'inbox',       label: 'Bandeja'     },
+  { to: '/contacts',        iconKey: 'contacts',    label: 'Contactos'   },
+  { to: '/leads',           iconKey: 'leads',       label: 'Consultas'   },
+  { to: '/properties',      iconKey: 'properties',  label: 'Propiedades' },
+  { to: '/operations',      iconKey: 'operations',  label: 'Operaciones' },
+  { to: '/payroll',         iconKey: 'money',       label: 'Liquidación', adminOnly: true },
+  { to: '/finanzas',        iconKey: 'finanzas',    label: 'Finanzas', adminOnly: true },
+  { to: '/vencimientos',    iconKey: 'alarm',       label: 'Vencimientos', adminOnly: true },
+  { to: '/my-commissions',  iconKey: 'wallet',      label: 'Mis comisiones', agentOnly: true },
+  { to: '/team',            iconKey: 'team',        label: 'Equipo'      },
+  { to: '/calendar',        iconKey: 'calendar',    label: 'Calendario'  },
+  { to: '/analytics',       iconKey: 'analytics',   label: 'Analíticas'  },
+];
 
 const TurdoLogo = ({ compact = false }) => (
   <div className={`flex items-center gap-3 ${compact ? 'justify-center' : ''}`}>
@@ -52,9 +70,13 @@ const TurdoLogo = ({ compact = false }) => (
 );
 
 export const Sidebar = () => {
-  const { unreadCount, dueReminders } = useApp();
+  const { unreadCount, dueReminders, currentUser } = useApp();
   const navigate = useNavigate();
   const { status: pushStatus, loading: pushLoading, subscribe, unsubscribe } = usePushNotifications();
+  const visibleNav = NAV.filter(n =>
+    (!n.adminOnly || currentUser.role === 'admin') &&
+    (!n.agentOnly || currentUser.role === 'agent')
+  );
 
   const handleLogout = () => {
     localStorage.removeItem('crm_session');
@@ -68,7 +90,7 @@ export const Sidebar = () => {
       </div>
 
       <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto">
-        {NAV.map(({ to, iconKey, label }) => (
+        {visibleNav.map(({ to, iconKey, label }) => (
           <NavLink
             key={to}
             to={to}
@@ -152,10 +174,14 @@ export const Sidebar = () => {
 };
 
 export const MobileNav = () => {
-  const { unreadCount, dueReminders } = useApp();
-  const MOBILE_NAV = NAV.slice(0, 5);
+  const { unreadCount, dueReminders, currentUser } = useApp();
+  const visible = NAV.filter(n =>
+    (!n.adminOnly || currentUser.role === 'admin') &&
+    (!n.agentOnly || currentUser.role === 'agent')
+  );
+  const MOBILE_NAV = visible.slice(0, 5);
   return (
-    <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white border-t border-border">
+    <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white border-t border-border safe-bottom">
       <div className="flex">
         {MOBILE_NAV.map(({ to, iconKey, label }) => (
           <NavLink

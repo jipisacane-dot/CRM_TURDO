@@ -8,15 +8,65 @@ import { AGENTS, PROPERTIES } from '../data/mock';
 import { StatusBadge } from '../components/ui/StatusBadge';
 import { ChannelIcon } from '../components/ui/ChannelIcon';
 import { Avatar } from '../components/ui/Avatar';
-import type { Channel } from '../types';
+import type { Channel, Lead } from '../types';
 import { formatDistanceToNow } from 'date-fns';
 import { es } from 'date-fns/locale';
+
+const HOUR = 60 * 60 * 1000;
+
+// First response time in ms — undefined if vendor never replied
+const firstResponseMs = (l: Lead): number | undefined => {
+  const firstIn = l.messages.find(m => m.direction === 'in');
+  const firstOut = l.messages.find(m => m.direction === 'out');
+  if (!firstIn || !firstOut) return undefined;
+  const diff = new Date(firstOut.timestamp).getTime() - new Date(firstIn.timestamp).getTime();
+  return diff >= 0 ? diff : undefined;
+};
+
+const msToHuman = (ms: number): string => {
+  if (ms < HOUR) return `${Math.max(1, Math.round(ms / 60000))} min`;
+  if (ms < 24 * HOUR) return `${Math.round(ms / HOUR * 10) / 10} h`;
+  return `${Math.round(ms / (24 * HOUR))} d`;
+};
 
 const StatCard = ({ label, value, sub, color = 'text-white' }: { label: string; value: string | number; sub?: string; color?: string }) => (
   <div className="bg-bg-card border border-border rounded-2xl p-5">
     <div className="text-muted text-xs uppercase tracking-wider mb-2">{label}</div>
     <div className={`text-3xl font-bold ${color}`}>{value}</div>
     {sub && <div className="text-muted text-xs mt-1">{sub}</div>}
+  </div>
+);
+
+interface AlertCardProps {
+  accent: string;
+  label: string;
+  count: number;
+  leads: Lead[];
+  hint: string;
+  badgeColor: string;
+  onClick: () => void;
+  timeFn: (l: Lead) => string;
+}
+
+const AlertCard = ({ accent, label, count, leads, hint, badgeColor, onClick, timeFn }: AlertCardProps) => (
+  <div
+    onClick={onClick}
+    className={`${accent} border rounded-2xl p-4 cursor-pointer hover:opacity-90 transition-all`}
+  >
+    <div className="flex items-center justify-between mb-2">
+      <span className="text-xs font-semibold uppercase tracking-wider text-gray-700">{label}</span>
+      <span className={`text-2xl font-bold ${badgeColor}`}>{count}</span>
+    </div>
+    <div className="text-xs text-gray-600 mb-3">{hint}</div>
+    <div className="space-y-1.5">
+      {leads.map(l => (
+        <div key={l.id} className="flex items-center justify-between text-xs bg-white/60 rounded-lg px-2.5 py-1.5">
+          <span className="text-gray-800 font-medium truncate flex-1">{l.name}</span>
+          <span className="text-gray-500 text-[10px] flex-shrink-0 ml-2 truncate max-w-[50%]">{timeFn(l)}</span>
+        </div>
+      ))}
+      {leads.length === 0 && <div className="text-xs text-gray-500 italic">Sin pendientes</div>}
+    </div>
   </div>
 );
 
@@ -27,8 +77,9 @@ const CHANNEL_COLORS: Record<Channel, string> = {
 };
 
 export default function Dashboard() {
-  const { leads } = useApp();
+  const { leads, currentUser } = useApp();
   const navigate = useNavigate();
+  const isAdmin = currentUser.role === 'admin';
 
   const stats = useMemo(() => {
     const today = new Date();
@@ -38,6 +89,55 @@ export default function Dashboard() {
     const won = leads.filter(l => l.status === 'won').length;
     const active = leads.filter(l => l.status !== 'won' && l.status !== 'lost').length;
     return { total: leads.length, newToday, unassigned, won, active };
+  }, [leads]);
+
+  // ── Follow-up alerts (admin only) ─────────────────────────────────────────
+  const followUp = useMemo(() => {
+    const now = Date.now();
+    const activeLeads = leads.filter(l => l.status !== 'won' && l.status !== 'lost');
+
+    const unassigned = activeLeads
+      .filter(l => !l.assignedTo)
+      .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+
+    // Assigned leads where vendor hasn't responded yet (no 'out' message)
+    const noReply = activeLeads
+      .filter(l => l.assignedTo && !l.messages.some(m => m.direction === 'out'))
+      .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+
+    // Stale: last activity older than 24h, still active
+    const stale = activeLeads
+      .filter(l => now - new Date(l.lastActivity).getTime() > 24 * HOUR)
+      .sort((a, b) => new Date(a.lastActivity).getTime() - new Date(b.lastActivity).getTime());
+
+    // Critical: no reply AND assigned more than 4h ago
+    const critical = noReply.filter(l => now - new Date(l.createdAt).getTime() > 4 * HOUR);
+
+    return { unassigned, noReply, stale, critical };
+  }, [leads]);
+
+  // ── Per-agent real performance ────────────────────────────────────────────
+  const agentPerformance = useMemo(() => {
+    return AGENTS.filter(a => a.role === 'agent').map(a => {
+      const mine = leads.filter(l => l.assignedTo === a.id);
+      const active = mine.filter(l => l.status !== 'won' && l.status !== 'lost').length;
+      const won = mine.filter(l => l.status === 'won').length;
+      const cold = mine.filter(l => {
+        if (l.status === 'won' || l.status === 'lost') return false;
+        return Date.now() - new Date(l.lastActivity).getTime() > 24 * HOUR;
+      }).length;
+      const responseTimes = mine.map(firstResponseMs).filter((x): x is number => x !== undefined);
+      const avgResponse = responseTimes.length > 0
+        ? responseTimes.reduce((s, n) => s + n, 0) / responseTimes.length
+        : undefined;
+      const noReplyYet = mine.filter(l =>
+        l.status !== 'won' && l.status !== 'lost' && !l.messages.some(m => m.direction === 'out')
+      ).length;
+      return {
+        id: a.id, name: a.name, avatar: a.avatar,
+        total: mine.length, active, won, cold, avgResponse, noReplyYet,
+      };
+    }).sort((a, b) => b.active - a.active);
   }, [leads]);
 
   const channelData = useMemo(() => {
@@ -87,6 +187,110 @@ export default function Dashboard() {
         <StatCard label="Vendedores" value={AGENTS.filter(a => a.role === 'agent').length} sub="En 2 sucursales" />
         <StatCard label="Total clics" value={PROPERTIES.reduce((s, p) => s + p.totalClicks, 0).toLocaleString('es-AR')} sub="Todos los portales" />
       </div>
+
+      {/* ── Follow-up alerts (admin only) ──────────────────────────────────── */}
+      {isAdmin && (followUp.unassigned.length > 0 || followUp.noReply.length > 0 || followUp.stale.length > 0) && (
+        <div className="bg-bg-card border border-border rounded-2xl p-5">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h3 className="text-white font-semibold flex items-center gap-2">
+                <span>🚨</span> Alertas de seguimiento
+              </h3>
+              <p className="text-muted text-xs mt-0.5">Leads que requieren acción — no los pierdas</p>
+            </div>
+            <button onClick={() => navigate('/inbox')} className="text-crimson-bright text-xs hover:underline">Ir a bandeja →</button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            {/* Sin asignar */}
+            <AlertCard
+              accent="bg-red-50 border-red-200"
+              label="Sin asignar"
+              count={followUp.unassigned.length}
+              leads={followUp.unassigned.slice(0, 3)}
+              onClick={() => navigate('/inbox')}
+              hint="Leticia tiene que asignar"
+              badgeColor="text-red-600"
+              timeFn={l => `Llegó ${formatDistanceToNow(new Date(l.createdAt), { locale: es, addSuffix: true })}`}
+            />
+            {/* Sin primera respuesta */}
+            <AlertCard
+              accent="bg-amber-50 border-amber-200"
+              label="Sin primera respuesta"
+              count={followUp.noReply.length}
+              leads={followUp.noReply.slice(0, 3)}
+              onClick={() => navigate('/inbox')}
+              hint={followUp.critical.length > 0 ? `${followUp.critical.length} con más de 4hs` : 'Asignados sin contestar'}
+              badgeColor="text-amber-700"
+              timeFn={l => {
+                const agent = AGENTS.find(a => a.id === l.assignedTo);
+                return `${agent?.name.split(' ')[0] ?? '?'} · ${formatDistanceToNow(new Date(l.createdAt), { locale: es })}`;
+              }}
+            />
+            {/* Leads fríos */}
+            <AlertCard
+              accent="bg-blue-50 border-blue-200"
+              label="Fríos (+24hs sin actividad)"
+              count={followUp.stale.length}
+              leads={followUp.stale.slice(0, 3)}
+              onClick={() => navigate('/inbox')}
+              hint="Retomá el contacto"
+              badgeColor="text-blue-700"
+              timeFn={l => {
+                const agent = AGENTS.find(a => a.id === l.assignedTo);
+                return `${agent?.name.split(' ')[0] ?? 'Sin asignar'} · ${formatDistanceToNow(new Date(l.lastActivity), { locale: es })}`;
+              }}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* ── Real per-agent performance (admin only) ─────────────────────────── */}
+      {isAdmin && (
+        <div className="bg-bg-card border border-border rounded-2xl p-5">
+          <h3 className="text-white font-semibold mb-4">Performance del equipo</h3>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border">
+                  <th className="text-left px-3 py-2 text-xs text-muted font-medium uppercase tracking-wider">Vendedor</th>
+                  <th className="text-right px-3 py-2 text-xs text-muted font-medium uppercase tracking-wider">Activos</th>
+                  <th className="text-right px-3 py-2 text-xs text-muted font-medium uppercase tracking-wider">Sin contestar</th>
+                  <th className="text-right px-3 py-2 text-xs text-muted font-medium uppercase tracking-wider">Fríos</th>
+                  <th className="text-right px-3 py-2 text-xs text-muted font-medium uppercase tracking-wider">1ra respuesta</th>
+                  <th className="text-right px-3 py-2 text-xs text-muted font-medium uppercase tracking-wider">Ganados</th>
+                </tr>
+              </thead>
+              <tbody>
+                {agentPerformance.map(a => (
+                  <tr key={a.id} className="border-b border-border/50 hover:bg-bg-hover/40 transition-colors">
+                    <td className="px-3 py-3">
+                      <div className="flex items-center gap-2">
+                        <Avatar initials={a.avatar} size="xs" />
+                        <span className="text-white text-sm font-medium">{a.name}</span>
+                      </div>
+                    </td>
+                    <td className="px-3 py-3 text-right text-gray-300">{a.active}</td>
+                    <td className="px-3 py-3 text-right">
+                      <span className={a.noReplyYet > 0 ? 'text-amber-600 font-semibold' : 'text-muted'}>{a.noReplyYet}</span>
+                    </td>
+                    <td className="px-3 py-3 text-right">
+                      <span className={a.cold > 0 ? 'text-blue-600 font-semibold' : 'text-muted'}>{a.cold}</span>
+                    </td>
+                    <td className="px-3 py-3 text-right text-gray-300">
+                      {a.avgResponse !== undefined ? msToHuman(a.avgResponse) : <span className="text-muted">—</span>}
+                    </td>
+                    <td className="px-3 py-3 text-right text-green-600 font-medium">{a.won}</td>
+                  </tr>
+                ))}
+                {agentPerformance.length === 0 && (
+                  <tr><td colSpan={6} className="text-center text-muted py-8 text-sm">Sin vendedores cargados</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* Charts */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

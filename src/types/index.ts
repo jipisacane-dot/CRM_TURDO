@@ -12,6 +12,7 @@ export interface Agent {
   phone: string;
   branch: Branch;
   avatar: string;
+  imageUrl?: string;
   role: 'admin' | 'agent';
   stats: {
     total: number;

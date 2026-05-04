@@ -43,7 +43,7 @@ function ContactAvatar({ lead }: { lead: Lead }) {
 }
 
 export default function Contacts() {
-  const { leads, refreshLeads, loading } = useApp();
+  const { leads, refreshLeads, loading, currentUser } = useApp();
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -52,7 +52,10 @@ export default function Contacts() {
   const [importResult, setImportResult] = useState<{ ok: number; errors: number } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const filtered = leads
+  const isAdmin = currentUser.role === 'admin';
+  const scope = isAdmin ? leads : leads.filter(l => l.assignedTo === currentUser.id);
+
+  const filtered = scope
     .filter(l => statusFilter === 'all' || l.status === statusFilter)
     .filter(l => channelFilter === 'all' || l.channel === channelFilter)
     .filter(l => {

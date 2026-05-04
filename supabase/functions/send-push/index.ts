@@ -120,11 +120,13 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
   try {
-    const { title, body, contact_id, url } = await req.json() as {
-      title: string; body: string; contact_id?: string; url?: string;
+    const { title, body, contact_id, url, agent_id } = await req.json() as {
+      title: string; body: string; contact_id?: string; url?: string; agent_id?: string;
     };
 
-    const { data: subs } = await supabase.from('push_subscriptions').select('*');
+    let query = supabase.from('push_subscriptions').select('*');
+    if (agent_id) query = query.eq('agent_id', agent_id);
+    const { data: subs } = await query;
     if (!subs?.length) return new Response(JSON.stringify({ sent: 0 }), { headers: corsHeaders });
 
     const payload = JSON.stringify({ title, body, contact_id, url: url ?? '/inbox' });

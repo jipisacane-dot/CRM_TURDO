@@ -1,7 +1,8 @@
-import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, useMemo, type ReactNode } from 'react';
 import type { Lead, Agent } from '../types';
 import { AGENTS } from '../data/mock';
 import { db, supabase, type DBContact, type DBMessage, type DBReminder } from '../services/supabase';
+import { tokko } from '../services/tokko';
 
 // ── Convert Supabase rows → CRM Lead type ─────────────────────────────────────
 
@@ -36,6 +37,12 @@ const toLead = (c: DBContact, messages: DBMessage[]): Lead => ({
 
 // ── Context ───────────────────────────────────────────────────────────────────
 
+interface SendResult {
+  ok: boolean;
+  outside_window?: boolean;
+  error?: string;
+}
+
 interface AppContextType {
   currentUser: Agent;
   leads: Lead[];
@@ -43,7 +50,7 @@ interface AppContextType {
   refreshLeads: () => Promise<void>;
   assignLead: (leadId: string, agentId: string) => Promise<void>;
   updateLeadStatus: (leadId: string, status: Lead['status']) => Promise<void>;
-  sendMessage: (leadId: string, content: string) => Promise<void>;
+  sendMessage: (leadId: string, content: string) => Promise<SendResult>;
   unreadCount: number;
   dueReminders: DBReminder[];
   createReminder: (contactId: string, title: string, dueAt: string, note?: string) => Promise<void>;
@@ -53,11 +60,19 @@ interface AppContextType {
 
 const AppContext = createContext<AppContextType | null>(null);
 
+function getSessionAgentId(): string {
+  try {
+    const raw = localStorage.getItem('crm_session');
+    if (!raw) return 'leticia';
+    return (JSON.parse(raw) as { agentId?: string }).agentId ?? 'leticia';
+  } catch { return 'leticia'; }
+}
+
 export const AppProvider = ({ children }: { children: ReactNode }) => {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [loading, setLoading] = useState(true);
   const [dueReminders, setDueReminders] = useState<DBReminder[]>([]);
-  const currentUser = AGENTS.find(a => a.id === 'leticia')!;
+  const currentUser = AGENTS.find(a => a.id === getSessionAgentId()) ?? AGENTS[0];
 
   const refreshLeads = useCallback(async () => {
     setLoading(true);
@@ -74,7 +89,23 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const refreshReminders = useCallback(async () => {
     try {
       const due = await db.reminders.listDue();
-      setDueReminders(due);
+      setDueReminders(prev => {
+        // Send push for reminders that just became due (not already in state)
+        const prevIds = new Set(prev.map(r => r.id));
+        const newDue = due.filter(r => !prevIds.has(r.id));
+        for (const r of newDue) {
+          supabase.functions.invoke('send-push', {
+            body: {
+              title: `🔔 ${r.title}`,
+              body: r.note ?? 'Recordatorio vencido',
+              contact_id: r.contact_id,
+              url: '/inbox',
+              agent_id: r.agent_id ?? undefined,
+            },
+          }).catch(console.error);
+        }
+        return due;
+      });
     } catch (e) {
       console.error('Error cargando recordatorios:', e);
     }
@@ -98,7 +129,12 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   };
 
   // Load on mount
-  useEffect(() => { refreshLeads(); refreshReminders(); }, [refreshLeads, refreshReminders]);
+  useEffect(() => {
+    refreshLeads();
+    refreshReminders();
+    // Pre-warm Tokko cache in background so Properties page loads instantly
+    if (tokko.hasKey()) tokko.getProperties().catch(() => {});
+  }, [refreshLeads, refreshReminders]);
 
   // Check reminders every 5 min
   useEffect(() => {
@@ -131,15 +167,26 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   }, [refreshLeads]);
 
   const assignLead = async (leadId: string, agentId: string) => {
+    const lead = leads.find(l => l.id === leadId);
     await db.contacts.update(leadId, {
       assigned_to: agentId,
-      status: leads.find(l => l.id === leadId)?.status === 'new' ? 'contacted' : undefined,
+      status: lead?.status === 'new' ? 'contacted' : undefined,
     });
     setLeads(prev => prev.map(l =>
       l.id === leadId
         ? { ...l, assignedTo: agentId, status: l.status === 'new' ? 'contacted' : l.status }
         : l
     ));
+    // Notify the assigned agent
+    supabase.functions.invoke('send-push', {
+      body: {
+        title: '📋 Lead asignado',
+        body: `${lead?.name ?? 'Nuevo contacto'} fue asignado a vos`,
+        contact_id: leadId,
+        url: '/inbox',
+        agent_id: agentId,
+      },
+    }).catch(console.error);
   };
 
   const updateLeadStatus = async (leadId: string, status: Lead['status']) => {
@@ -147,9 +194,9 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     setLeads(prev => prev.map(l => l.id === leadId ? { ...l, status } : l));
   };
 
-  const sendMessage = async (leadId: string, content: string) => {
+  const sendMessage = async (leadId: string, content: string): Promise<SendResult> => {
     const lead = leads.find(l => l.id === leadId);
-    if (!lead) return;
+    if (!lead) return { ok: false, error: 'Lead not found' };
 
     // Optimistic update — show message instantly
     const tempId = `temp_${Date.now()}`;
@@ -172,21 +219,38 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
         : l
     ));
 
-    const { error } = await supabase.functions.invoke('send-message', {
+    const { data, error } = await supabase.functions.invoke('send-message', {
       body: { contact_id: leadId, content, agent_id: currentUser.id },
     });
 
-    if (error) console.error('Error sending message:', error);
+    if (error) {
+      console.error('Error sending message:', error);
+      return { ok: false, error: error.message };
+    }
+
+    const delivery = data?.delivery;
+    if (delivery && !delivery.ok) {
+      return {
+        ok: false,
+        outside_window: delivery.outside_window,
+        error: delivery.error,
+      };
+    }
+
+    return { ok: true };
   };
 
-  const unreadCount = leads.reduce((sum, lead) =>
-    sum + lead.messages.filter(m => !m.read && m.direction === 'in').length, 0);
-
-  return (
-    <AppContext.Provider value={{ currentUser, leads, loading, refreshLeads, assignLead, updateLeadStatus, sendMessage, unreadCount, dueReminders, createReminder, completeReminder, refreshReminders }}>
-      {children}
-    </AppContext.Provider>
+  const unreadCount = useMemo(
+    () => leads.reduce((sum, lead) => sum + lead.messages.filter(m => !m.read && m.direction === 'in').length, 0),
+    [leads]
   );
+
+  const value = useMemo<AppContextType>(() => ({
+    currentUser, leads, loading, refreshLeads, assignLead, updateLeadStatus,
+    sendMessage, unreadCount, dueReminders, createReminder, completeReminder, refreshReminders,
+  }), [currentUser, leads, loading, refreshLeads, unreadCount, dueReminders, refreshReminders]);
+
+  return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 };
 
 export const useApp = () => {

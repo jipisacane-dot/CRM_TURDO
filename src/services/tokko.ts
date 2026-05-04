@@ -162,9 +162,9 @@ export const normalize = (p: TokkoProperty): CRMProperty => {
 
 // ── Cache ─────────────────────────────────────────────────────────────────────
 
-const CACHE_KEY = 'tokko_props_v2';
-const CACHE_TTL = 60 * 60 * 1000; // 60 min
-const CACHE_STALE = 5 * 60 * 1000; // serve stale up to 5 min after TTL before showing spinner
+const CACHE_KEY = 'tokko_props_v3';
+const CACHE_TTL = 60 * 60 * 1000;   // 60 min fresh
+const CACHE_STALE = 6 * 60 * 60 * 1000; // up to 6h stale (serve instantly while refreshing)
 
 interface CacheEntry { data: CRMProperty[]; ts: number }
 
@@ -180,16 +180,34 @@ const getCache = (): { data: CRMProperty[]; stale: boolean } | null => {
 };
 
 const setCache = (data: CRMProperty[]) => {
-  try { localStorage.setItem(CACHE_KEY, JSON.stringify({ data, ts: Date.now() })); } catch {}
+  try { localStorage.setItem(CACHE_KEY, JSON.stringify({ data, ts: Date.now() })); }
+  catch (e) {
+    // QuotaExceeded — clear other caches and retry once
+    if ((e as Error).name === 'QuotaExceededError') {
+      try { localStorage.removeItem(CACHE_KEY); localStorage.setItem(CACHE_KEY, JSON.stringify({ data, ts: Date.now() })); } catch {}
+    }
+  }
 };
+
+// In-flight dedup — avoid two getProperties() calls firing duplicate requests
+let inflight: Promise<CRMProperty[]> | null = null;
 
 // ── API calls ─────────────────────────────────────────────────────────────────
 
 const get = async <T>(resource: string, params: Record<string, string> = {}): Promise<T> => {
   const qs = new URLSearchParams({ key: API_KEY, format: 'json', lang: 'es_ar', ...params });
-  const res = await fetch(`${BASE}/${resource}/?${qs}`);
-  if (!res.ok) throw new Error(`Tokko API error ${res.status}: ${res.statusText}`);
-  return res.json() as Promise<T>;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15_000);
+  try {
+    const res = await fetch(`${BASE}/${resource}/?${qs}`, { signal: controller.signal });
+    if (!res.ok) throw new Error(`Tokko API error ${res.status}: ${res.statusText}`);
+    return res.json() as Promise<T>;
+  } catch (e) {
+    if ((e as Error).name === 'AbortError') throw new Error('Tokko tardó demasiado. Revisá tu conexión.');
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
 };
 
 export const tokko = {
@@ -200,46 +218,88 @@ export const tokko = {
     // Return fresh cache immediately
     if (cached && !cached.stale) return cached.data;
 
-    const fetchFresh = async (): Promise<CRMProperty[]> => {
-      const PAGE = 100;
-      const first = await get<TokkoListResponse>('property', {
-        limit: String(PAGE), offset: '0', only_recents: 'false',
-      });
-      const total = first.meta.total_count;
-      const all: TokkoProperty[] = [...first.objects];
+    // Dedup concurrent callers
+    if (inflight) return inflight;
 
-      if (total > PAGE) {
-        const pages = Math.ceil((total - PAGE) / PAGE);
+    const fetchFresh = async (): Promise<CRMProperty[]> => {
+      const PAGE = 250; // Tokko max page size
+      // Fire first 3 pages speculatively in parallel — no waiting for meta.total_count
+      const SPECULATIVE = 3;
+      const firstBatch = await Promise.all(
+        Array.from({ length: SPECULATIVE }, (_, i) =>
+          get<TokkoListResponse>('property', {
+            limit: String(PAGE),
+            offset: String(i * PAGE),
+            only_recents: 'false',
+          }).catch(() => ({ meta: { total_count: 0, limit: PAGE, offset: 0, next: null, previous: null }, objects: [] }))
+        )
+      );
+
+      const all: TokkoProperty[] = [];
+      firstBatch.forEach(r => all.push(...r.objects));
+      const total = firstBatch[0]?.meta.total_count ?? 0;
+
+      // Fetch any remaining pages beyond the speculative batch
+      const fetched = SPECULATIVE * PAGE;
+      if (total > fetched) {
+        const remaining = Math.ceil((total - fetched) / PAGE);
         const rest = await Promise.all(
-          Array.from({ length: pages }, (_, i) =>
-            get<TokkoListResponse>('property', { limit: String(PAGE), offset: String((i + 1) * PAGE) })
+          Array.from({ length: remaining }, (_, i) =>
+            get<TokkoListResponse>('property', {
+              limit: String(PAGE),
+              offset: String((SPECULATIVE + i) * PAGE),
+            }).catch(() => ({ meta: { total_count: 0, limit: PAGE, offset: 0, next: null, previous: null }, objects: [] }))
           )
         );
         rest.forEach(r => all.push(...r.objects));
       }
 
-      const result = all.map(normalize);
+      // Dedup by id (speculative fetch could overshoot when total < SPECULATIVE*PAGE)
+      const seen = new Set<number>();
+      const unique = all.filter(p => {
+        if (seen.has(p.id)) return false;
+        seen.add(p.id);
+        return true;
+      });
+
+      const result = unique.map(normalize);
       setCache(result);
       return result;
     };
 
     // Stale cache: return it immediately and refresh in background
     if (cached?.stale) {
-      fetchFresh().catch(console.error);
+      inflight = fetchFresh().finally(() => { inflight = null; });
+      inflight.catch(console.error);
       return cached.data;
     }
 
     // No cache: must wait for fresh data
-    return fetchFresh();
+    inflight = fetchFresh().finally(() => { inflight = null; });
+    return inflight;
   },
 
-  /** Fetch single property by ID */
+  /** Fetch single property by ID — uses list cache if available */
   async getProperty(id: number): Promise<CRMProperty> {
+    const cached = getCache();
+    if (cached) {
+      const found = cached.data.find(p => p.tokkoId === id);
+      if (found) return found;
+    }
     const qs = new URLSearchParams({ key: API_KEY, format: 'json', lang: 'es_ar' });
-    const res = await fetch(`${BASE}/property/${id}/?${qs}`);
-    if (!res.ok) throw new Error(`Tokko API error ${res.status}`);
-    const data = await res.json() as TokkoProperty;
-    return normalize(data);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 15_000);
+    try {
+      const res = await fetch(`${BASE}/property/${id}/?${qs}`, { signal: controller.signal });
+      if (!res.ok) throw new Error(`Tokko API error ${res.status}`);
+      const data = await res.json() as TokkoProperty;
+      return normalize(data);
+    } catch (e) {
+      if ((e as Error).name === 'AbortError') throw new Error('Tokko tardó demasiado. Revisá tu conexión.');
+      throw e;
+    } finally {
+      clearTimeout(timer);
+    }
   },
 
   /** Post a lead/contact inquiry to a property */

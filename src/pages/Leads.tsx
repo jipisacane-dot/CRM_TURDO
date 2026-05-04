@@ -13,7 +13,7 @@ const STATUSES: (LeadStatus | 'all')[] = ['all', 'new', 'contacted', 'qualified'
 const BRANCHES: (Branch | 'all')[] = ['all', 'Sucursal Centro', 'Sucursal Norte'];
 
 export default function Leads() {
-  const { leads, assignLead, updateLeadStatus } = useApp();
+  const { leads, assignLead, updateLeadStatus, currentUser } = useApp();
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<LeadStatus | 'all'>('all');
   const [branchFilter, setBranchFilter] = useState<Branch | 'all'>('all');
@@ -21,14 +21,17 @@ export default function Leads() {
   const [assigningLead, setAssigningLead] = useState<Lead | null>(null);
   const [detailLead, setDetailLead] = useState<Lead | null>(null);
 
-  const filtered = useMemo(() => leads
-    .filter(l => statusFilter === 'all' || l.status === statusFilter)
-    .filter(l => branchFilter === 'all' || l.branch === branchFilter)
-    .filter(l => agentFilter === 'all' || l.assignedTo === agentFilter)
-    .filter(l => !search || l.name.toLowerCase().includes(search.toLowerCase()) || (l.propertyTitle ?? '').toLowerCase().includes(search.toLowerCase()) || (l.phone ?? '').includes(search) || (l.email ?? '').includes(search))
-    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
-    [leads, search, statusFilter, branchFilter, agentFilter]
-  );
+  const isAdmin = currentUser.role === 'admin';
+
+  const filtered = useMemo(() => {
+    const scope = isAdmin ? leads : leads.filter(l => l.assignedTo === currentUser.id);
+    return scope
+      .filter(l => statusFilter === 'all' || l.status === statusFilter)
+      .filter(l => branchFilter === 'all' || l.branch === branchFilter)
+      .filter(l => !isAdmin || agentFilter === 'all' || l.assignedTo === agentFilter)
+      .filter(l => !search || l.name.toLowerCase().includes(search.toLowerCase()) || (l.propertyTitle ?? '').toLowerCase().includes(search.toLowerCase()) || (l.phone ?? '').includes(search) || (l.email ?? '').includes(search))
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }, [leads, isAdmin, currentUser.id, search, statusFilter, branchFilter, agentFilter]);
 
   return (
     <div className="p-5 md:p-8 space-y-5">
@@ -53,12 +56,14 @@ export default function Leads() {
           className="bg-bg-card border border-border rounded-xl px-3 py-2.5 text-sm text-white outline-none focus:border-crimson cursor-pointer">
           {BRANCHES.map(b => <option key={b} value={b}>{b === 'all' ? 'Todas las sucursales' : b}</option>)}
         </select>
-        <select value={agentFilter} onChange={e => setAgentFilter(e.target.value)}
-          className="bg-bg-card border border-border rounded-xl px-3 py-2.5 text-sm text-white outline-none focus:border-crimson cursor-pointer">
-          <option value="all">Todos los vendedores</option>
-          <option value="">Sin asignar</option>
-          {AGENTS.filter(a => a.role === 'agent').map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-        </select>
+        {isAdmin && (
+          <select value={agentFilter} onChange={e => setAgentFilter(e.target.value)}
+            className="bg-bg-card border border-border rounded-xl px-3 py-2.5 text-sm text-white outline-none focus:border-crimson cursor-pointer">
+            <option value="all">Todos los vendedores</option>
+            <option value="">Sin asignar</option>
+            {AGENTS.filter(a => a.role === 'agent').map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+          </select>
+        )}
       </div>
 
       {/* Table */}

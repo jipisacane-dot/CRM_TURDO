@@ -62,16 +62,21 @@ export const db = {
     },
 
     async listWithMessages(): Promise<Array<DBContact & { messages: DBMessage[] }>> {
-      const { data, error } = await supabase
-        .from('contacts')
-        .select('*, messages(*)')
-        .order('created_at', { ascending: false });
-      if (error) throw error;
-      return (data ?? []).map((c: DBContact & { messages: DBMessage[] }) => ({
+      const [{ data: contacts, error: ce }, { data: messages, error: me }] = await Promise.all([
+        supabase.from('contacts').select('*').order('created_at', { ascending: false }),
+        supabase.from('messages').select('*').order('created_at', { ascending: true }),
+      ]);
+      if (ce) throw ce;
+      if (me) throw me;
+      const msgByContact = new Map<string, DBMessage[]>();
+      for (const m of (messages ?? []) as DBMessage[]) {
+        const arr = msgByContact.get(m.contact_id) ?? [];
+        arr.push(m);
+        msgByContact.set(m.contact_id, arr);
+      }
+      return (contacts ?? []).map((c: DBContact) => ({
         ...c,
-        messages: (c.messages ?? []).sort(
-          (a: DBMessage, b: DBMessage) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-        ),
+        messages: msgByContact.get(c.id) ?? [],
       }));
     },
 

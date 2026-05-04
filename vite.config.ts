@@ -4,8 +4,17 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   plugins: [react()],
   build: {
+    chunkSizeWarningLimit: 600,
     rollupOptions: {
       external: [],
+      output: {
+        manualChunks: {
+          'react-vendor':    ['react', 'react-dom', 'react-router-dom'],
+          'recharts-vendor': ['recharts', 'react-is'],
+          'supabase-vendor': ['@supabase/supabase-js'],
+          'date-vendor':     ['date-fns', 'date-fns/locale'],
+        },
+      },
     },
   },
   optimizeDeps: {
