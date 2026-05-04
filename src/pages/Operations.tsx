@@ -44,6 +44,10 @@ interface NewOpDraft {
   newPropAddress: string;
   newPropRooms: string;
   newPropPrice: string;
+  newPropSurface: string;
+  newPropBarrio: string;
+  newPropDescription: string;
+  newPropCoverFile: File | null;
   vendedor_id: string;
   captador_id: string;
   contact_id: string;
@@ -61,6 +65,10 @@ const blankDraft = (): NewOpDraft => ({
   newPropAddress: '',
   newPropRooms: '',
   newPropPrice: '',
+  newPropSurface: '',
+  newPropBarrio: '',
+  newPropDescription: '',
+  newPropCoverFile: null,
   vendedor_id: '',
   captador_id: '',
   contact_id: '',
@@ -85,6 +93,9 @@ export default function Operations() {
   const [summary, setSummary] = useState<PipelineSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
+  const [modalStep, setModalStep] = useState<'form' | 'docs'>('form');
+  const [createdOpId, setCreatedOpId] = useState<string | null>(null);
+  const [createdOpDocs, setCreatedOpDocs] = useState<DBDocument[]>([]);
   const [draft, setDraft] = useState<NewOpDraft>(blankDraft());
   const [saving, setSaving] = useState(false);
   const [statusTab, setStatusTab] = useState<OperationStatus | 'all'>('all');
@@ -151,7 +162,17 @@ export default function Operations() {
 
   const openNew = () => {
     setDraft(blankDraft());
+    setModalStep('form');
+    setCreatedOpId(null);
+    setCreatedOpDocs([]);
     setModalOpen(true);
+  };
+
+  const closeModal = () => {
+    setModalOpen(false);
+    setModalStep('form');
+    setCreatedOpId(null);
+    setCreatedOpDocs([]);
   };
 
   const handleSave = async () => {
@@ -190,20 +211,32 @@ export default function Operations() {
         }
         const newProp = await propertiesApi.create({
           address: draft.newPropAddress,
-          description: null,
+          description: draft.newPropDescription || null,
           rooms: draft.newPropRooms ? Number(draft.newPropRooms) : null,
-          surface_m2: null,
+          surface_m2: draft.newPropSurface ? Number(draft.newPropSurface) : null,
           list_price_usd: draft.newPropPrice ? Number(draft.newPropPrice) : null,
           status: draft.status === 'reservada' ? 'reservada' : 'disponible',
           captador_id: draft.captador_id || null,
           fecha_consignacion: todayISO(),
           tokko_sku: null,
           notes: null,
+          barrio: draft.newPropBarrio || null,
+          cover_photo_url: null,
         });
         propertyId = newProp.id;
+
+        // Subir foto de portada si la cargó
+        if (draft.newPropCoverFile) {
+          try {
+            await propertiesApi.uploadCoverPhoto(propertyId, draft.newPropCoverFile);
+          } catch (e) {
+            console.error('Error subiendo foto de portada', e);
+            // No bloqueamos el flujo si falla la foto
+          }
+        }
       }
 
-      await operationsApi.create({
+      const newOp = await operationsApi.create({
         property_id: propertyId,
         captador_id: draft.captador_id || null,
         vendedor_id: vendedorId,
@@ -225,13 +258,36 @@ export default function Operations() {
         agency_commission_pct: 6,
         notes: draft.notes || null,
       });
-      setModalOpen(false);
+      // Pasar a step 2 (docs) en vez de cerrar
+      setCreatedOpId(newOp.id);
+      setModalStep('docs');
+      setCreatedOpDocs([]);
       await refresh();
     } catch (e) {
       console.error(e);
       alert('Error al guardar la operación: ' + (e as Error).message);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleStepDocsUpload = async (file: File, category: string, title: string) => {
+    if (!createdOpId) return;
+    if (file.size > 20 * 1024 * 1024) {
+      alert('El archivo supera 20MB.');
+      return;
+    }
+    try {
+      await documentsApi.upload({
+        operationId: createdOpId,
+        file,
+        category,
+        title: title || file.name,
+      });
+      const docs = await documentsApi.listForOperation(createdOpId);
+      setCreatedOpDocs(docs);
+    } catch (e) {
+      alert('Error subiendo: ' + (e as Error).message);
     }
   };
 
@@ -529,7 +585,8 @@ export default function Operations() {
       </div>
 
       {/* Modal cargar venta */}
-      <Modal open={modalOpen} onClose={() => setModalOpen(false)} title="Cargar operación" width="max-w-2xl">
+      <Modal open={modalOpen} onClose={closeModal} title={modalStep === 'form' ? 'Cargar operación' : '✓ Operación creada — Subí los documentos'} width="max-w-2xl">
+        {modalStep === 'form' && (
         <div className="space-y-4">
           {/* Estado inicial */}
           <div>
@@ -579,15 +636,15 @@ export default function Operations() {
             <div className="bg-bg-hover rounded-xl p-4 space-y-3 border border-border">
               <div className="text-xs text-muted uppercase tracking-wider font-medium">Nueva propiedad</div>
               <div>
-                <label className="text-xs text-muted mb-1 block">Dirección</label>
+                <label className="text-xs text-muted mb-1 block">Dirección *</label>
                 <input
                   value={draft.newPropAddress}
                   onChange={(e) => setDraft({ ...draft, newPropAddress: e.target.value })}
                   className="w-full bg-white border border-border rounded-xl px-3 py-2 text-sm text-[#0F172A]"
-                  placeholder="Ej: Brown 1645, 3° A — Centro MdP"
+                  placeholder="Ej: Brown 1645, 3° A"
                 />
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-3 gap-3">
                 <div>
                   <label className="text-xs text-muted mb-1 block">Ambientes</label>
                   <input
@@ -596,6 +653,16 @@ export default function Operations() {
                     onChange={(e) => setDraft({ ...draft, newPropRooms: e.target.value })}
                     className="w-full bg-white border border-border rounded-xl px-3 py-2 text-sm text-[#0F172A]"
                     placeholder="3"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-muted mb-1 block">Superficie m²</label>
+                  <input
+                    type="number"
+                    value={draft.newPropSurface}
+                    onChange={(e) => setDraft({ ...draft, newPropSurface: e.target.value })}
+                    className="w-full bg-white border border-border rounded-xl px-3 py-2 text-sm text-[#0F172A]"
+                    placeholder="65"
                   />
                 </div>
                 <div>
@@ -608,6 +675,37 @@ export default function Operations() {
                     placeholder="143900"
                   />
                 </div>
+              </div>
+              <div>
+                <label className="text-xs text-muted mb-1 block">Barrio / Zona</label>
+                <input
+                  value={draft.newPropBarrio}
+                  onChange={(e) => setDraft({ ...draft, newPropBarrio: e.target.value })}
+                  className="w-full bg-white border border-border rounded-xl px-3 py-2 text-sm text-[#0F172A]"
+                  placeholder="Centro · Plaza Mitre · Norte · etc."
+                />
+              </div>
+              <div>
+                <label className="text-xs text-muted mb-1 block">Descripción</label>
+                <textarea
+                  value={draft.newPropDescription}
+                  onChange={(e) => setDraft({ ...draft, newPropDescription: e.target.value })}
+                  className="w-full bg-white border border-border rounded-xl px-3 py-2 text-sm text-[#0F172A]"
+                  rows={2}
+                  placeholder="Estado, comodidades, particularidades, datos catastrales..."
+                />
+              </div>
+              <div>
+                <label className="text-xs text-muted mb-1 block">Foto de portada</label>
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => setDraft({ ...draft, newPropCoverFile: e.target.files?.[0] ?? null })}
+                  className="w-full text-xs text-muted file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-medium file:bg-crimson file:text-white hover:file:bg-crimson-bright"
+                />
+                {draft.newPropCoverFile && (
+                  <div className="text-[10px] text-muted mt-1">{draft.newPropCoverFile.name} ({Math.round(draft.newPropCoverFile.size / 1024)} KB)</div>
+                )}
               </div>
             </div>
           )}
@@ -779,25 +877,31 @@ export default function Operations() {
           </div>
 
           {/* Preview comisiones */}
-          {draft.precio_venta_usd && Number(draft.precio_venta_usd) > 0 && draft.status !== 'reservada' && (
-            <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-sm">
-              <div className="font-medium text-emerald-800 mb-1">Comisiones que se generarán:</div>
-              <div className="text-emerald-700">
-                Vendedor: <span className="font-semibold">{fmtUSD(Number(draft.precio_venta_usd) * 0.01)}</span>
-                {draft.captador_id && <> · Captador: <span className="font-semibold">{fmtUSD(Number(draft.precio_venta_usd) * 0.01)}</span></>}
-                {' · '}Casa Turdo: <span className="font-semibold">{fmtUSD(Number(draft.precio_venta_usd) * 0.03)}</span>
+          {draft.precio_venta_usd && Number(draft.precio_venta_usd) > 0 && draft.status !== 'reservada' && (() => {
+            const precio = Number(draft.precio_venta_usd);
+            const turdo = precio * 0.06;
+            return (
+              <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-sm">
+                <div className="font-medium text-emerald-800 mb-1">Comisiones (al aprobarse):</div>
+                <div className="text-emerald-700 space-y-0.5">
+                  <div>Turdo (6%): <span className="font-semibold">{fmtUSD(turdo)}</span></div>
+                  <div className="text-xs">Vendedor (escalonado según orden de venta del mes):</div>
+                  <div className="text-xs ml-3">· Si es 1ra del mes (20%): {fmtUSD(turdo * 0.20)}</div>
+                  <div className="text-xs ml-3">· Si es 2da (25%): {fmtUSD(turdo * 0.25)}</div>
+                  <div className="text-xs ml-3">· Si es 3ra+ (30%): {fmtUSD(turdo * 0.30)}</div>
+                </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
           {draft.status === 'reservada' && (
             <div className="bg-sky-50 border border-sky-200 rounded-xl p-3 text-sm text-sky-800">
-              Las comisiones se van a generar automáticamente cuando avances esta operación a "Boleto firmado".
+              Las comisiones se van a generar automáticamente cuando avances esta operación a "Boleto firmado" y Leticia la apruebe.
             </div>
           )}
 
           <div className="flex justify-end gap-2 pt-2">
             <button
-              onClick={() => setModalOpen(false)}
+              onClick={closeModal}
               disabled={saving}
               className="px-4 py-2 text-sm rounded-xl border border-border text-[#475569] hover:bg-bg-hover transition-all"
             >
@@ -808,10 +912,45 @@ export default function Operations() {
               disabled={saving}
               className="px-4 py-2 text-sm rounded-xl bg-crimson text-white hover:bg-crimson-bright transition-all disabled:opacity-60"
             >
-              {saving ? 'Guardando…' : 'Guardar operación'}
+              {saving ? 'Guardando…' : 'Guardar y subir docs →'}
             </button>
           </div>
         </div>
+        )}
+
+        {modalStep === 'docs' && createdOpId && (
+          <div className="space-y-4">
+            <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-sm text-emerald-800">
+              Operación cargada. Subí los documentos que tengas (boleto, escritura, comprobante de seña, etc.).
+              No son obligatorios — podés cerrar y subirlos después desde el detalle de la operación.
+            </div>
+
+            <DocsUploadStep
+              docs={createdOpDocs}
+              onUpload={handleStepDocsUpload}
+              onDelete={async (doc) => {
+                await documentsApi.remove(doc);
+                if (createdOpId) {
+                  const docs = await documentsApi.listForOperation(createdOpId);
+                  setCreatedOpDocs(docs);
+                }
+              }}
+              onPreview={async (doc) => {
+                const url = await documentsApi.getPublicUrl(doc.file_path);
+                window.open(url, '_blank');
+              }}
+            />
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                onClick={closeModal}
+                className="px-4 py-2 text-sm rounded-xl bg-crimson text-white hover:bg-crimson-bright transition-all"
+              >
+                Listo
+              </button>
+            </div>
+          </div>
+        )}
       </Modal>
 
       {/* Modal detalle operación */}
@@ -984,6 +1123,117 @@ export default function Operations() {
           </div>
         )}
       </Modal>
+    </div>
+  );
+}
+
+// ── Sub-componente: paso 2 de upload de docs en el modal de carga ──────────
+interface DocsUploadStepProps {
+  docs: DBDocument[];
+  onUpload: (file: File, category: string, title: string) => Promise<void>;
+  onDelete: (doc: DBDocument) => Promise<void>;
+  onPreview: (doc: DBDocument) => Promise<void>;
+}
+
+function DocsUploadStep({ docs, onUpload, onDelete, onPreview }: DocsUploadStepProps) {
+  const [category, setCategory] = useState<string>('boleto');
+  const [title, setTitle] = useState('');
+  const [uploading, setUploading] = useState(false);
+
+  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    try {
+      await onUpload(file, category, title);
+      setTitle('');
+      e.target.value = '';
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const docsByCategory = useMemo(() => {
+    const map = new Map<string, DBDocument[]>();
+    for (const d of docs) {
+      const arr = map.get(d.category) ?? [];
+      arr.push(d);
+      map.set(d.category, arr);
+    }
+    return map;
+  }, [docs]);
+
+  return (
+    <div className="space-y-4">
+      {/* Form de upload */}
+      <div className="bg-bg-hover rounded-xl p-4 space-y-3 border border-border">
+        <div className="text-xs text-muted uppercase tracking-wider font-medium">Subir nuevo documento</div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="text-xs text-muted mb-1 block">Tipo</label>
+            <select
+              value={category}
+              onChange={(e) => setCategory(e.target.value)}
+              className="w-full bg-white border border-border rounded-xl px-3 py-2 text-sm text-[#0F172A]"
+            >
+              {DOC_CATEGORIES.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="text-xs text-muted mb-1 block">Título (opcional)</label>
+            <input
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              className="w-full bg-white border border-border rounded-xl px-3 py-2 text-sm text-[#0F172A]"
+              placeholder="Ej: Boleto firmado 04/05"
+            />
+          </div>
+        </div>
+        <input
+          type="file"
+          onChange={(e) => void handleFile(e)}
+          disabled={uploading}
+          className="w-full text-xs text-muted file:mr-3 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-xs file:font-medium file:bg-crimson file:text-white hover:file:bg-crimson-bright disabled:opacity-50"
+        />
+        {uploading && <div className="text-xs text-muted">Subiendo…</div>}
+      </div>
+
+      {/* Lista de docs ya subidos en este flow */}
+      {docs.length > 0 && (
+        <div>
+          <div className="text-xs text-muted uppercase tracking-wider font-medium mb-2">Subidos ({docs.length})</div>
+          <div className="space-y-2">
+            {Array.from(docsByCategory.entries()).map(([cat, list]) => {
+              const label = DOC_CATEGORIES.find(c => c.key === cat)?.label ?? cat;
+              return (
+                <div key={cat} className="bg-white border border-border rounded-xl p-3">
+                  <div className="text-xs font-semibold text-[#0F172A] mb-1.5">{label}</div>
+                  <div className="space-y-1">
+                    {list.map(d => (
+                      <div key={d.id} className="flex items-center justify-between gap-2 text-sm">
+                        <button
+                          onClick={() => void onPreview(d)}
+                          className="text-[#0F172A] hover:text-crimson transition-colors text-left flex-1 truncate"
+                          title={d.file_name}
+                        >
+                          {d.title}
+                        </button>
+                        <span className="text-[10px] text-muted">{d.file_size ? Math.round(d.file_size / 1024) + ' KB' : ''}</span>
+                        <button
+                          onClick={() => void onDelete(d)}
+                          className="text-xs text-red-600 hover:bg-red-50 px-2 py-0.5 rounded"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

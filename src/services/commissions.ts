@@ -28,6 +28,8 @@ export interface DBProperty {
   fecha_consignacion: string;
   tokko_sku: string | null;
   notes: string | null;
+  barrio: string | null;
+  cover_photo_url: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -154,6 +156,19 @@ export const propertiesApi = {
   async update(id: string, fields: Partial<DBProperty>): Promise<void> {
     const { error } = await supabase.from('properties').update(fields).eq('id', id);
     if (error) throw error;
+  },
+  async uploadCoverPhoto(propertyId: string, file: File): Promise<string> {
+    const cleanName = file.name.replace(/[^a-zA-Z0-9.\-_]/g, '_');
+    const filePath = `properties/${propertyId}/cover_${Date.now()}_${cleanName}`;
+    const { error: upErr } = await supabase.storage
+      .from('operation-docs')
+      .upload(filePath, file, { cacheControl: '3600', upsert: false });
+    if (upErr) throw upErr;
+    const { data } = supabase.storage.from('operation-docs').getPublicUrl(filePath);
+    const url = data.publicUrl;
+    const { error } = await supabase.from('properties').update({ cover_photo_url: url }).eq('id', propertyId);
+    if (error) throw error;
+    return url;
   },
 };
 

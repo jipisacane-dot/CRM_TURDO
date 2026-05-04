@@ -5,17 +5,21 @@ import {
   agentsApi,
   advancesApi,
   commissionsApi,
+  documentsApi,
   operationsApi,
   currentYearMonth,
   fmtARS,
   fmtUSD,
   fmtDate,
   monthLabel,
+  DOC_CATEGORIES,
   type AdvanceWithAgent,
   type CommissionWithRefs,
   type DBAgent,
+  type DBDocument,
   type PendingApprovalRow,
 } from '../services/commissions';
+import { supabase } from '../services/supabase';
 import { downloadReceiptPDF } from '../services/pdfReceipts';
 
 interface AgentRow {
@@ -47,9 +51,11 @@ export default function Payroll() {
   const [advances, setAdvances] = useState<AdvanceWithAgent[]>([]);
   const [allAdvances, setAllAdvances] = useState<AdvanceWithAgent[]>([]);
   const [pendingOps, setPendingOps] = useState<PendingApprovalRow[]>([]);
+  const [pendingOpsDocsCount, setPendingOpsDocsCount] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [detailAgent, setDetailAgent] = useState<DBAgent | null>(null);
   const [rejectModal, setRejectModal] = useState<{ op: PendingApprovalRow; reason: string } | null>(null);
+  const [docsModal, setDocsModal] = useState<{ op: PendingApprovalRow; docs: DBDocument[] } | null>(null);
 
   const refresh = async () => {
     setLoading(true);
@@ -66,9 +72,37 @@ export default function Payroll() {
       setAdvances(advMonth);
       setAllAdvances(advAll);
       setPendingOps(pend);
+
+      // Fetch counts de docs por operation pendiente, una sola query
+      if (pend.length > 0) {
+        const opIds = pend.map(p => p.id);
+        const { data: docs } = await supabase
+          .from('operation_documents')
+          .select('operation_id')
+          .in('operation_id', opIds);
+        const counts: Record<string, number> = {};
+        for (const d of docs ?? []) counts[d.operation_id] = (counts[d.operation_id] ?? 0) + 1;
+        setPendingOpsDocsCount(counts);
+      } else {
+        setPendingOpsDocsCount({});
+      }
     } finally {
       setLoading(false);
     }
+  };
+
+  const openDocsModal = async (op: PendingApprovalRow) => {
+    try {
+      const docs = await documentsApi.listForOperation(op.id);
+      setDocsModal({ op, docs });
+    } catch (e) {
+      alert('Error cargando docs: ' + (e as Error).message);
+    }
+  };
+
+  const previewDoc = async (doc: DBDocument) => {
+    const url = await documentsApi.getPublicUrl(doc.file_path);
+    window.open(url, '_blank');
   };
 
   const approveOp = async (id: string) => {
@@ -260,6 +294,7 @@ export default function Payroll() {
               const turdo = Number(op.precio_venta_usd) * Number(op.agency_commission_pct ?? 6) / 100;
               const pct = op.orden_estimado === 1 ? 20 : op.orden_estimado === 2 ? 25 : 30;
               const agente = turdo * pct / 100;
+              const docsCount = pendingOpsDocsCount[op.id] ?? 0;
               return (
                 <div key={op.id} className="bg-white border border-amber-200 rounded-xl p-3 flex items-center justify-between gap-3 flex-wrap">
                   <div className="flex-1 min-w-0">
@@ -272,7 +307,18 @@ export default function Payroll() {
                     </div>
                     {op.notes && <div className="text-xs italic text-muted mt-1">"{op.notes}"</div>}
                   </div>
-                  <div className="flex gap-2">
+                  <div className="flex gap-2 items-center">
+                    <button
+                      onClick={() => void openDocsModal(op)}
+                      className={`text-xs px-3 py-1.5 rounded-md border transition-all ${
+                        docsCount > 0
+                          ? 'border-sky-300 text-sky-700 hover:bg-sky-50'
+                          : 'border-border text-muted hover:bg-bg-hover'
+                      }`}
+                      title={docsCount === 0 ? 'No hay documentos cargados' : `Ver ${docsCount} documento${docsCount === 1 ? '' : 's'}`}
+                    >
+                      {docsCount === 0 ? 'Sin docs' : `📎 ${docsCount} doc${docsCount === 1 ? '' : 's'}`}
+                    </button>
                     <button
                       onClick={() => void approveOp(op.id)}
                       className="text-xs px-3 py-1.5 rounded-md bg-emerald-600 text-white hover:bg-emerald-700 transition-all font-medium"
@@ -488,6 +534,55 @@ export default function Payroll() {
             </div>
           );
         })()}
+      </Modal>
+
+      {/* Modal ver documentos */}
+      <Modal open={!!docsModal} onClose={() => setDocsModal(null)} title="Documentos de la venta" width="max-w-2xl">
+        {docsModal && (
+          <div className="space-y-4">
+            <div className="bg-bg-hover rounded-xl p-3 text-sm">
+              <div className="font-medium text-[#0F172A]">{docsModal.op.vendedor_name}</div>
+              <div className="text-muted text-xs">{docsModal.op.property_address ?? 'Sin dirección'}</div>
+              <div className="text-muted text-xs">Boleto {fmtDate(docsModal.op.fecha_boleto)} · {fmtUSD(Number(docsModal.op.precio_venta_usd))}</div>
+            </div>
+            {docsModal.docs.length === 0 ? (
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-900 text-center">
+                Esta venta todavía no tiene documentos cargados. Si querés, podés aprobarla igual y pedir al vendedor que los suba después.
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {docsModal.docs.map(d => {
+                  const catLabel = DOC_CATEGORIES.find(c => c.key === d.category)?.label ?? d.category;
+                  return (
+                    <div key={d.id} className="bg-white border border-border rounded-xl p-3 flex items-center justify-between gap-3">
+                      <div className="flex-1 min-w-0">
+                        <div className="text-xs uppercase text-muted tracking-wider">{catLabel}</div>
+                        <div className="text-sm text-[#0F172A] font-medium truncate">{d.title}</div>
+                        <div className="text-[10px] text-muted">
+                          {d.file_name} · {d.file_size ? Math.round(d.file_size / 1024) + ' KB' : ''} · {fmtDate(d.created_at.slice(0, 10))}
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => void previewDoc(d)}
+                        className="text-xs px-3 py-1.5 rounded-md border border-sky-300 text-sky-700 hover:bg-sky-50 transition-all"
+                      >
+                        Abrir
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                onClick={() => setDocsModal(null)}
+                className="px-4 py-2 text-sm rounded-xl border border-border text-[#475569] hover:bg-bg-hover transition-all"
+              >
+                Cerrar
+              </button>
+            </div>
+          </div>
+        )}
       </Modal>
 
       {/* Modal rechazar venta */}
