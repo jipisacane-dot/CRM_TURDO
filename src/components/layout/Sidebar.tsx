@@ -155,11 +155,11 @@ export const Sidebar = () => {
 
         <div className="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-bg-hover cursor-pointer transition-all">
           <div className="w-7 h-7 bg-crimson rounded-full flex items-center justify-center text-white text-[11px] font-semibold flex-shrink-0">
-            LT
+            {currentUser.avatar ?? currentUser.name.split(' ').map(p => p[0]).slice(0, 2).join('').toUpperCase()}
           </div>
           <div className="min-w-0 flex-1">
-            <div className="text-[#0F172A] text-sm font-medium truncate">Leticia Turdo</div>
-            <div className="text-muted text-xs">Administradora</div>
+            <div className="text-[#0F172A] text-sm font-medium truncate">{currentUser.name}</div>
+            <div className="text-muted text-xs">{currentUser.role === 'admin' ? 'Administradora' : (currentUser.branch ?? 'Vendedor/a')}</div>
           </div>
         </div>
 
