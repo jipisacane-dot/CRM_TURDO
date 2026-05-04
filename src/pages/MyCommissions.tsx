@@ -5,14 +5,17 @@ import {
   agentsApi,
   advancesApi,
   commissionsApi,
+  operationsApi,
   fmtARS,
   fmtUSD,
   fmtDate,
   monthLabel,
   currentYearMonth,
+  escalonadoPctForOrden,
   type AdvanceWithAgent,
   type CommissionWithRefs,
   type DBAgent,
+  type OperationWithRefs,
 } from '../services/commissions';
 import { downloadReceiptPDF } from '../services/pdfReceipts';
 
@@ -21,6 +24,7 @@ export default function MyCommissions() {
 
   const [agentDb, setAgentDb] = useState<DBAgent | null>(null);
   const [allCommissions, setAllCommissions] = useState<CommissionWithRefs[]>([]);
+  const [myOperations, setMyOperations] = useState<OperationWithRefs[]>([]);
   const [advances, setAdvances] = useState<AdvanceWithAgent[]>([]);
   const [loading, setLoading] = useState(true);
   const [exchangeRate, setExchangeRate] = useState<string>('1300');
@@ -30,12 +34,14 @@ export default function MyCommissions() {
   const [advSaving, setAdvSaving] = useState(false);
 
   const reload = async (agentId: string) => {
-    const [cs, ads] = await Promise.all([
+    const [cs, ads, ops] = await Promise.all([
       commissionsApi.listForAgent(agentId),
       advancesApi.listForAgent(agentId),
+      operationsApi.listWithRefs(),
     ]);
     setAllCommissions(cs);
     setAdvances(ads);
+    setMyOperations(ops.filter(o => o.vendedor_id === agentId));
   };
 
   useEffect(() => {
@@ -94,7 +100,6 @@ export default function MyCommissions() {
 
   const thisMonthTotalUsd = thisMonth.reduce((s, c) => s + Number(c.monto_usd), 0);
   const thisMonthTotalArs = thisMonthTotalUsd * rate;
-  const baseSalary = agentDb ? Number(agentDb.base_salary_ars) : 0;
 
   const advancesThisMonth = advances.filter(a =>
     a.applied_to_month?.startsWith(ym) && (a.status === 'aprobado' || a.status === 'liquidado')
@@ -102,9 +107,21 @@ export default function MyCommissions() {
   const advancesTotalUsd = advancesThisMonth.reduce((s, a) => s + Number(a.amount_usd), 0);
   const advancesTotalArs = advancesTotalUsd * rate;
 
-  const thisMonthGrandTotal = baseSalary + thisMonthTotalArs - advancesTotalArs;
+  const thisMonthGrandTotal = thisMonthTotalArs - advancesTotalArs;
 
   const pendingAdvances = advances.filter(a => a.status === 'pendiente');
+
+  // Ventas pendientes / rechazadas del mes (sin commission generada todavía)
+  const myMonthOps = useMemo(() =>
+    myOperations.filter(o => o.fecha_boleto?.startsWith(ym)),
+    [myOperations, ym],
+  );
+  const pendingOps = myMonthOps.filter(o => o.approval_status === 'pending');
+  const rejectedOps = myMonthOps.filter(o => o.approval_status === 'rejected');
+  const approvedOpsCount = myMonthOps.filter(o => o.approval_status === 'approved').length;
+  // Para el preview: si cargo otra venta ahora, sería la #(approvedOpsCount + pending + 1)
+  const nextOrden = approvedOpsCount + pendingOps.length + 1;
+  const nextPct = escalonadoPctForOrden(nextOrden);
 
   if (loading) {
     return <div className="p-5 md:p-8 text-muted text-sm">Cargando…</div>;
@@ -169,13 +186,13 @@ export default function MyCommissions() {
         <div className="flex items-baseline gap-4 flex-wrap">
           <div>
             <div className="text-3xl font-bold tabular-nums">{fmtARS(thisMonthGrandTotal)}</div>
-            <div className="text-sm opacity-80 mt-0.5">Total estimado a recibir</div>
+            <div className="text-sm opacity-80 mt-0.5">Total a cobrar este mes</div>
           </div>
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-5 pt-5 border-t border-white/20">
           <div>
-            <div className="text-xs uppercase opacity-80">Sueldo fijo</div>
-            <div className="text-lg font-semibold mt-0.5 tabular-nums">{fmtARS(baseSalary)}</div>
+            <div className="text-xs uppercase opacity-80">Ventas aprobadas</div>
+            <div className="text-lg font-semibold mt-0.5 tabular-nums">{approvedOpsCount}</div>
           </div>
           <div>
             <div className="text-xs uppercase opacity-80">Comisiones USD</div>
@@ -192,7 +209,49 @@ export default function MyCommissions() {
             </div>
           )}
         </div>
+        <div className="mt-4 pt-4 border-t border-white/20 text-xs opacity-90">
+          Si cargás otra venta ahora, sería la <strong>#{nextOrden}</strong> del mes → <strong>{nextPct}%</strong> sobre el 6% de Turdo.
+        </div>
       </div>
+
+      {/* Ventas pendientes de aprobación o rechazadas */}
+      {(pendingOps.length > 0 || rejectedOps.length > 0) && (
+        <div className="space-y-3">
+          {pendingOps.length > 0 && (
+            <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4">
+              <div className="text-sm font-semibold text-amber-900 mb-2">
+                Tenés {pendingOps.length} venta{pendingOps.length === 1 ? '' : 's'} pendiente{pendingOps.length === 1 ? '' : 's'} de aprobación de Leticia
+              </div>
+              <div className="space-y-1">
+                {pendingOps.map(o => (
+                  <div key={o.id} className="text-sm text-amber-800 flex justify-between">
+                    <span>{fmtDate(o.fecha_boleto)} — {o.property?.address ?? 'sin dirección'}</span>
+                    <span className="font-semibold">{fmtUSD(Number(o.precio_venta_usd))}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {rejectedOps.length > 0 && (
+            <div className="bg-red-50 border border-red-200 rounded-2xl p-4">
+              <div className="text-sm font-semibold text-red-900 mb-2">
+                Ventas rechazadas este mes ({rejectedOps.length})
+              </div>
+              <div className="space-y-1">
+                {rejectedOps.map(o => (
+                  <div key={o.id} className="text-sm text-red-800">
+                    <div className="flex justify-between">
+                      <span>{fmtDate(o.fecha_boleto)} — {o.property?.address ?? 'sin dirección'}</span>
+                      <span>{fmtUSD(Number(o.precio_venta_usd))}</span>
+                    </div>
+                    {o.rejected_reason && <div className="text-xs italic mt-0.5">Motivo: {o.rejected_reason}</div>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Histórico mes a mes */}
       <div>
@@ -236,27 +295,34 @@ export default function MyCommissions() {
                       <tr className="text-left text-xs uppercase tracking-wider text-muted">
                         <th className="px-4 py-2 font-medium">Boleto</th>
                         <th className="px-4 py-2 font-medium">Propiedad</th>
-                        <th className="px-4 py-2 font-medium">Tipo</th>
-                        <th className="px-4 py-2 font-medium text-right">Monto</th>
+                        <th className="px-4 py-2 font-medium text-center">N°</th>
+                        <th className="px-4 py-2 font-medium text-right">Precio venta</th>
+                        <th className="px-4 py-2 font-medium text-right">% escal.</th>
+                        <th className="px-4 py-2 font-medium text-right">Mi comisión</th>
                         <th className="px-4 py-2 font-medium text-center">Estado</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-border">
-                      {list.map(c => (
-                        <tr key={c.id}>
-                          <td className="px-4 py-2 text-[#0F172A]">{c.operation ? fmtDate(c.operation.fecha_boleto) : '—'}</td>
-                          <td className="px-4 py-2 text-[#0F172A]">{c.operation?.property?.address ?? '—'}</td>
-                          <td className="px-4 py-2 text-muted capitalize">{c.tipo === 'venta' ? 'Vendí' : 'Capté'}</td>
-                          <td className="px-4 py-2 text-right text-[#0F172A] font-semibold tabular-nums">{fmtUSD(Number(c.monto_usd))}</td>
-                          <td className="px-4 py-2 text-center">
-                            {c.paid ? (
-                              <span className="inline-block px-2 py-1 bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-md text-xs font-medium">Pagado</span>
-                            ) : (
-                              <span className="inline-block px-2 py-1 bg-amber-100 text-amber-700 border border-amber-200 rounded-md text-xs font-medium">Pendiente</span>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
+                      {list.map(c => {
+                        const orden = c.nivel_escalonado ?? '—';
+                        return (
+                          <tr key={c.id}>
+                            <td className="px-4 py-2 text-[#0F172A]">{c.operation ? fmtDate(c.operation.fecha_boleto) : '—'}</td>
+                            <td className="px-4 py-2 text-[#0F172A]">{c.operation?.property?.address ?? '—'}</td>
+                            <td className="px-4 py-2 text-center text-[#0F172A] font-medium tabular-nums">#{orden}</td>
+                            <td className="px-4 py-2 text-right text-muted tabular-nums">{c.operation ? fmtUSD(Number(c.operation.precio_venta_usd)) : '—'}</td>
+                            <td className="px-4 py-2 text-right text-muted tabular-nums">{Number(c.porcentaje).toFixed(0)}%</td>
+                            <td className="px-4 py-2 text-right text-[#0F172A] font-semibold tabular-nums">{fmtUSD(Number(c.monto_usd))}</td>
+                            <td className="px-4 py-2 text-center">
+                              {c.paid ? (
+                                <span className="inline-block px-2 py-1 bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-md text-xs font-medium">Pagado</span>
+                              ) : (
+                                <span className="inline-block px-2 py-1 bg-amber-100 text-amber-700 border border-amber-200 rounded-md text-xs font-medium">Por cobrar</span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>

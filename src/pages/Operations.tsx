@@ -129,6 +129,7 @@ export default function Operations() {
   useEffect(() => { void refresh(); }, []);
 
   const sellableAgents = useMemo(() => agents.filter(a => a.role === 'agent' && a.active), [agents]);
+  const myAgentId = useMemo(() => agents.find(a => a.email === currentUser.email)?.id ?? null, [agents, currentUser.email]);
 
   const filtered = useMemo(() => {
     return ops.filter(o => {
@@ -154,8 +155,12 @@ export default function Operations() {
   };
 
   const handleSave = async () => {
-    if (!draft.vendedor_id || !draft.precio_venta_usd) {
-      alert('Completá vendedor y precio.');
+    if (isAdmin && !draft.vendedor_id) {
+      alert('Elegí qué vendedor cargó la venta.');
+      return;
+    }
+    if (!draft.precio_venta_usd) {
+      alert('Cargá el precio de venta.');
       return;
     }
     if (draft.status !== 'reservada' && !draft.fecha_boleto) {
@@ -166,6 +171,13 @@ export default function Operations() {
       alert('Indicá la fecha de la reserva.');
       return;
     }
+    // Si NO es admin, el vendedor se setea automáticamente al usuario logueado
+    const vendedorId = isAdmin ? draft.vendedor_id : (myAgentId ?? draft.vendedor_id);
+    if (!vendedorId) {
+      alert('No pudimos identificar tu perfil de vendedor. Avisale a Leticia.');
+      return;
+    }
+
     setSaving(true);
     try {
       let propertyId = draft.property_id;
@@ -182,7 +194,7 @@ export default function Operations() {
           rooms: draft.newPropRooms ? Number(draft.newPropRooms) : null,
           surface_m2: null,
           list_price_usd: draft.newPropPrice ? Number(draft.newPropPrice) : null,
-          status: draft.status === 'reservada' ? 'reservada' : 'vendida',
+          status: draft.status === 'reservada' ? 'reservada' : 'disponible',
           captador_id: draft.captador_id || null,
           fecha_consignacion: todayISO(),
           tokko_sku: null,
@@ -194,7 +206,7 @@ export default function Operations() {
       await operationsApi.create({
         property_id: propertyId,
         captador_id: draft.captador_id || null,
-        vendedor_id: draft.vendedor_id,
+        vendedor_id: vendedorId,
         precio_venta_usd: Number(draft.precio_venta_usd),
         fecha_boleto: draft.fecha_boleto || todayISO(),
         fecha_escritura: draft.fecha_escritura || null,
@@ -204,6 +216,13 @@ export default function Operations() {
         status: draft.status,
         cancelled_at: null,
         cancelled_reason: null,
+        // Auto-aprobado si lo carga el admin, sino queda pendiente
+        approval_status: isAdmin ? 'approved' : 'pending',
+        approved_by: isAdmin ? (currentUser.id ?? null) : null,
+        approved_at: null, // trigger lo setea
+        rejected_reason: null,
+        paid_at: null,
+        agency_commission_pct: 6,
         notes: draft.notes || null,
       });
       setModalOpen(false);
@@ -332,14 +351,12 @@ export default function Operations() {
           <h1 className="text-2xl font-bold text-[#0F172A]">Operaciones</h1>
           <p className="text-muted text-sm mt-0.5">Pipeline de ventas — desde reserva hasta escritura</p>
         </div>
-        {isAdmin && (
-          <button
-            onClick={openNew}
-            className="px-4 py-2.5 bg-crimson hover:bg-crimson-bright text-white rounded-xl text-sm font-medium transition-all"
-          >
-            + Cargar operación
-          </button>
-        )}
+        <button
+          onClick={openNew}
+          className="px-4 py-2.5 bg-crimson hover:bg-crimson-bright text-white rounded-xl text-sm font-medium transition-all"
+        >
+          {isAdmin ? '+ Cargar operación' : '+ Cargar venta'}
+        </button>
       </div>
 
       {/* Pipeline summary */}
@@ -351,18 +368,14 @@ export default function Operations() {
       </div>
 
       {/* Stats secundarias */}
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-2 gap-4">
         <div className="bg-white border border-border rounded-2xl p-4">
           <div className="text-muted text-xs uppercase tracking-wider mb-1">Volumen vista actual</div>
           <div className="text-xl font-bold text-[#0F172A]">{fmtUSD(totalActiveVolume)}</div>
         </div>
         <div className="bg-white border border-border rounded-2xl p-4">
-          <div className="text-muted text-xs uppercase tracking-wider mb-1">Comisión Turdo (3%)</div>
-          <div className="text-xl font-bold text-emerald-600">{fmtUSD(totalActiveVolume * 0.03)}</div>
-        </div>
-        <div className="bg-white border border-border rounded-2xl p-4">
-          <div className="text-muted text-xs uppercase tracking-wider mb-1">Comisión equipo (2%)</div>
-          <div className="text-xl font-bold text-crimson">{fmtUSD(totalActiveVolume * 0.02)}</div>
+          <div className="text-muted text-xs uppercase tracking-wider mb-1">Comisión Turdo (6%)</div>
+          <div className="text-xl font-bold text-emerald-600">{fmtUSD(totalActiveVolume * 0.06)}</div>
         </div>
       </div>
 
@@ -454,9 +467,23 @@ export default function Operations() {
                     <td className="px-4 py-3 text-sm text-[#0F172A]">{op.vendedor?.name ?? '—'}</td>
                     <td className="px-4 py-3 text-sm text-right text-[#0F172A] font-semibold tabular-nums">{fmtUSD(Number(op.precio_venta_usd))}</td>
                     <td className="px-4 py-3 text-sm">
-                      <span className={`inline-block px-2 py-1 rounded-md text-xs font-medium border ${STATUS_COLOR[op.status]}`}>
-                        {STATUS_LABEL[op.status]}
-                      </span>
+                      <div className="flex flex-col gap-1">
+                        <span className={`inline-block px-2 py-1 rounded-md text-xs font-medium border ${STATUS_COLOR[op.status]} w-fit`}>
+                          {STATUS_LABEL[op.status]}
+                        </span>
+                        {op.approval_status === 'pending' && (
+                          <span className="inline-block px-2 py-0.5 rounded-md text-[10px] font-medium border bg-amber-100 text-amber-700 border-amber-200 w-fit">⏳ Pendiente aprobación</span>
+                        )}
+                        {op.approval_status === 'rejected' && (
+                          <span className="inline-block px-2 py-0.5 rounded-md text-[10px] font-medium border bg-red-100 text-red-700 border-red-200 w-fit" title={op.rejected_reason ?? ''}>✗ Rechazada</span>
+                        )}
+                        {op.approval_status === 'approved' && op.paid_at && (
+                          <span className="inline-block px-2 py-0.5 rounded-md text-[10px] font-medium border bg-emerald-100 text-emerald-700 border-emerald-200 w-fit">✓ Pagada</span>
+                        )}
+                        {op.approval_status === 'approved' && !op.paid_at && (
+                          <span className="inline-block px-2 py-0.5 rounded-md text-[10px] font-medium border bg-sky-100 text-sky-700 border-sky-200 w-fit">✓ Aprobada · por cobrar</span>
+                        )}
+                      </div>
                     </td>
                     {isAdmin ? (
                       <td className="px-4 py-3 text-sm">
@@ -522,9 +549,14 @@ export default function Operations() {
               ))}
             </div>
             <p className="text-[11px] text-muted mt-1">
-              {draft.status === 'reservada' && 'Sin comisiones todavía. Se generan cuando se firma el boleto.'}
-              {draft.status === 'boleto' && 'Se generan las comisiones automáticamente.'}
-              {draft.status === 'escriturada' && 'Se generan las comisiones y se marca la propiedad como vendida.'}
+              {isAdmin
+                ? (draft.status === 'reservada'
+                    ? 'Sin comisiones todavía. Se generan cuando se firma el boleto y la venta queda aprobada.'
+                    : 'Como admin, esta venta queda aprobada y se calculan las comisiones automáticamente.')
+                : (draft.status === 'reservada'
+                    ? 'Cargá la reserva. Cuando firmes el boleto, Leticia aprueba la venta.'
+                    : 'La venta queda pendiente de aprobación de Leticia. Vas a recibir notificación cuando la apruebe o rechace.')
+              }
             </p>
           </div>
 
@@ -592,19 +624,28 @@ export default function Operations() {
                 <option value="">— Sin captador —</option>
                 {sellableAgents.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
               </select>
-              <p className="text-[10px] text-muted mt-1">1% del precio</p>
+              <p className="text-[10px] text-muted mt-1">Quién consignó la propiedad (informativo)</p>
             </div>
             <div>
-              <label className="text-sm font-medium text-[#0F172A] mb-1.5 block">Vendedor *</label>
-              <select
-                value={draft.vendedor_id}
-                onChange={(e) => setDraft({ ...draft, vendedor_id: e.target.value })}
-                className="w-full bg-white border border-border rounded-xl px-3 py-2 text-sm text-[#0F172A]"
-              >
-                <option value="">— Elegir —</option>
-                {sellableAgents.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-              </select>
-              <p className="text-[10px] text-muted mt-1">1% del precio</p>
+              <label className="text-sm font-medium text-[#0F172A] mb-1.5 block">Vendedor {isAdmin && '*'}</label>
+              {isAdmin ? (
+                <select
+                  value={draft.vendedor_id}
+                  onChange={(e) => setDraft({ ...draft, vendedor_id: e.target.value })}
+                  className="w-full bg-white border border-border rounded-xl px-3 py-2 text-sm text-[#0F172A]"
+                >
+                  <option value="">— Elegir —</option>
+                  {sellableAgents.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                </select>
+              ) : (
+                <input
+                  type="text"
+                  value={agents.find(a => a.id === myAgentId)?.name ?? currentUser.name ?? 'Vos'}
+                  disabled
+                  className="w-full bg-bg-hover border border-border rounded-xl px-3 py-2 text-sm text-muted"
+                />
+              )}
+              <p className="text-[10px] text-muted mt-1">Cobra escalonado: 1ra 20% · 2da 25% · 3ra+ 30% sobre el 6% de Turdo</p>
             </div>
           </div>
 

@@ -33,6 +33,7 @@ export interface DBProperty {
 }
 
 export type OperationStatus = 'reservada' | 'boleto' | 'escriturada' | 'cancelada';
+export type ApprovalStatus = 'pending' | 'approved' | 'rejected';
 
 export interface DBOperation {
   id: string;
@@ -49,6 +50,12 @@ export interface DBOperation {
   notes: string | null;
   cancelled_at: string | null;
   cancelled_reason: string | null;
+  approval_status: ApprovalStatus;
+  approved_by: string | null;
+  approved_at: string | null;
+  rejected_reason: string | null;
+  paid_at: string | null;
+  agency_commission_pct: number;
   created_at: string;
   updated_at: string;
 }
@@ -69,8 +76,11 @@ export interface DBCommission {
   operation_id: string;
   agent_id: string;
   tipo: 'captacion' | 'venta';
-  porcentaje: number;
-  monto_usd: number;
+  porcentaje: number;            // % escalonado (20/25/30)
+  nivel_escalonado: number | null;
+  agency_commission_pct: number; // 6 por default (lo que cobra Turdo)
+  comision_total_usd: number;    // precio × agency_pct/100
+  monto_usd: number;             // comision_total × porcentaje/100 (lo que cobra el vendedor)
   mes_liquidacion: string;
   paid: boolean;
   paid_at: string | null;
@@ -177,6 +187,42 @@ export const operationsApi = {
     const { error } = await supabase.from('operations').delete().eq('id', id);
     if (error) throw error;
   },
+  async approve(id: string, approvedBy: string | null): Promise<void> {
+    const { error } = await supabase.from('operations').update({
+      approval_status: 'approved',
+      approved_by: approvedBy,
+      rejected_reason: null,
+    }).eq('id', id);
+    if (error) throw error;
+  },
+  async reject(id: string, reason: string, approvedBy: string | null): Promise<void> {
+    const { error } = await supabase.from('operations').update({
+      approval_status: 'rejected',
+      approved_by: approvedBy,
+      rejected_reason: reason,
+    }).eq('id', id);
+    if (error) throw error;
+  },
+  async markPaid(id: string): Promise<void> {
+    const { error } = await supabase.from('operations').update({
+      paid_at: new Date().toISOString(),
+    }).eq('id', id);
+    if (error) throw error;
+  },
+  async markUnpaid(id: string): Promise<void> {
+    const { error } = await supabase.from('operations').update({
+      paid_at: null,
+    }).eq('id', id);
+    if (error) throw error;
+  },
+  async listPendingApproval(): Promise<PendingApprovalRow[]> {
+    const { data, error } = await supabase
+      .from('v_operations_pending_approval')
+      .select('*')
+      .order('created_at', { ascending: true });
+    if (error) throw error;
+    return (data ?? []) as PendingApprovalRow[];
+  },
   async events(operationId: string): Promise<DBOperationEvent[]> {
     const { data, error } = await supabase
       .from('operation_events')
@@ -194,6 +240,21 @@ export interface PipelineSummary {
   status: OperationStatus;
   total: number;
   volumen_usd: number;
+}
+
+export interface PendingApprovalRow {
+  id: string;
+  property_id: string;
+  property_address: string | null;
+  vendedor_id: string;
+  vendedor_name: string | null;
+  precio_venta_usd: number;
+  agency_commission_pct: number;
+  fecha_boleto: string;
+  status: OperationStatus;
+  notes: string | null;
+  created_at: string;
+  orden_estimado: number;
 }
 
 export const pipelineApi = {
@@ -581,20 +642,153 @@ export const commissionsApi = {
     if (error) throw error;
     return (data ?? []) as unknown as CommissionWithRefs[];
   },
+  /**
+   * Marca pagado en operations.paid_at (fuente de verdad).
+   * Un trigger en DB sincroniza commissions.paid automaticamente.
+   */
   async markPaid(ids: string[], paidBy: string | null): Promise<void> {
-    const { error } = await supabase
+    // Obtener operation_ids
+    const { data: rows, error: e1 } = await supabase
       .from('commissions')
-      .update({ paid: true, paid_at: new Date().toISOString(), paid_by: paidBy })
+      .select('operation_id')
       .in('id', ids);
+    if (e1) throw e1;
+    const opIds = Array.from(new Set((rows ?? []).map(r => r.operation_id)));
+    if (opIds.length === 0) return;
+    const { error } = await supabase
+      .from('operations')
+      .update({ paid_at: new Date().toISOString() })
+      .in('id', opIds);
     if (error) throw error;
+    // Actualizar paid_by aparte (no esta en operations)
+    const { error: e2 } = await supabase
+      .from('commissions')
+      .update({ paid_by: paidBy })
+      .in('id', ids);
+    if (e2) throw e2;
   },
   async markUnpaid(ids: string[]): Promise<void> {
-    const { error } = await supabase
+    const { data: rows, error: e1 } = await supabase
       .from('commissions')
-      .update({ paid: false, paid_at: null, paid_by: null })
+      .select('operation_id')
       .in('id', ids);
+    if (e1) throw e1;
+    const opIds = Array.from(new Set((rows ?? []).map(r => r.operation_id)));
+    if (opIds.length === 0) return;
+    const { error } = await supabase
+      .from('operations')
+      .update({ paid_at: null })
+      .in('id', opIds);
+    if (error) throw error;
+    await supabase
+      .from('commissions')
+      .update({ paid_by: null })
+      .in('id', ids);
+  },
+};
+
+// ── Property Negotiations (vendedor marca "estoy negociando") ─────────────────
+
+export type NegotiationStatus = 'activa' | 'cerrada' | 'caida';
+
+export interface DBNegotiation {
+  id: string;
+  property_id: string;
+  agent_id: string;
+  contact_id: string | null;
+  notes: string | null;
+  status: NegotiationStatus;
+  closed_at: string | null;
+  closed_reason: string | null;
+  operation_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface NegotiationWithRefs extends DBNegotiation {
+  property: DBProperty | null;
+  agent: DBAgent | null;
+  contact: ContactLite | null;
+}
+
+export const negotiationsApi = {
+  async listActive(): Promise<NegotiationWithRefs[]> {
+    const { data, error } = await supabase
+      .from('property_negotiations')
+      .select(`
+        *,
+        property:properties(*),
+        agent:agents!property_negotiations_agent_id_fkey(*),
+        contact:contacts(id, name, phone, email, channel, status, notes)
+      `)
+      .eq('status', 'activa')
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    return (data ?? []) as unknown as NegotiationWithRefs[];
+  },
+  async listForAgent(agentId: string): Promise<NegotiationWithRefs[]> {
+    const { data, error } = await supabase
+      .from('property_negotiations')
+      .select(`
+        *,
+        property:properties(*),
+        agent:agents!property_negotiations_agent_id_fkey(*),
+        contact:contacts(id, name, phone, email, channel, status, notes)
+      `)
+      .eq('agent_id', agentId)
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    return (data ?? []) as unknown as NegotiationWithRefs[];
+  },
+  async create(p: { property_id: string; agent_id: string; contact_id?: string | null; notes?: string }): Promise<DBNegotiation> {
+    const { data, error } = await supabase
+      .from('property_negotiations')
+      .insert({
+        property_id: p.property_id,
+        agent_id: p.agent_id,
+        contact_id: p.contact_id ?? null,
+        notes: p.notes ?? null,
+        status: 'activa',
+      })
+      .select()
+      .single();
+    if (error) throw error;
+    return data;
+  },
+  async close(id: string, opts: { reason: 'venta' | 'cliente_no_quiso' | 'precio' | 'otro'; operation_id?: string | null; notes?: string }): Promise<void> {
+    const { error } = await supabase.from('property_negotiations').update({
+      status: opts.reason === 'venta' ? 'cerrada' : 'caida',
+      closed_at: new Date().toISOString(),
+      closed_reason: opts.reason,
+      operation_id: opts.operation_id ?? null,
+      notes: opts.notes ?? undefined,
+    }).eq('id', id);
     if (error) throw error;
   },
+  async remove(id: string): Promise<void> {
+    const { error } = await supabase.from('property_negotiations').delete().eq('id', id);
+    if (error) throw error;
+  },
+};
+
+// ── Helpers de comisión ──────────────────────────────────────────────────────
+
+export const escalonadoPctForOrden = (orden: number): number => {
+  if (orden <= 1) return 20;
+  if (orden === 2) return 25;
+  return 30;
+};
+
+/** Preview de comisión sin tocar DB (para mostrar en form mientras carga) */
+export const previewComisionAgente = (
+  precio_venta_usd: number,
+  ordenEstimado: number,
+  agency_pct: number = 6,
+): { turdo_usd: number; agente_usd: number; pct_escalonado: number } => {
+  const pct = escalonadoPctForOrden(ordenEstimado);
+  const turdo = Math.round(precio_venta_usd * agency_pct / 100 * 100) / 100;
+  const agente = Math.round(turdo * pct / 100 * 100) / 100;
+  return { turdo_usd: turdo, agente_usd: agente, pct_escalonado: pct };
 };
 
 // ── Helpers ──────────────────────────────────────────────────────────────────

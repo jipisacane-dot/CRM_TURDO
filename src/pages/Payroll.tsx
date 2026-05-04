@@ -5,6 +5,7 @@ import {
   agentsApi,
   advancesApi,
   commissionsApi,
+  operationsApi,
   currentYearMonth,
   fmtARS,
   fmtUSD,
@@ -13,6 +14,7 @@ import {
   type AdvanceWithAgent,
   type CommissionWithRefs,
   type DBAgent,
+  type PendingApprovalRow,
 } from '../services/commissions';
 import { downloadReceiptPDF } from '../services/pdfReceipts';
 
@@ -44,25 +46,46 @@ export default function Payroll() {
   const [commissions, setCommissions] = useState<CommissionWithRefs[]>([]);
   const [advances, setAdvances] = useState<AdvanceWithAgent[]>([]);
   const [allAdvances, setAllAdvances] = useState<AdvanceWithAgent[]>([]);
+  const [pendingOps, setPendingOps] = useState<PendingApprovalRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [detailAgent, setDetailAgent] = useState<DBAgent | null>(null);
+  const [rejectModal, setRejectModal] = useState<{ op: PendingApprovalRow; reason: string } | null>(null);
 
   const refresh = async () => {
     setLoading(true);
     try {
-      const [a, c, advMonth, advAll] = await Promise.all([
+      const [a, c, advMonth, advAll, pend] = await Promise.all([
         agentsApi.list(),
         commissionsApi.listForMonth(yearMonth),
         advancesApi.listForMonth(yearMonth),
         advancesApi.list(),
+        operationsApi.listPendingApproval(),
       ]);
       setAgents(a);
       setCommissions(c);
       setAdvances(advMonth);
       setAllAdvances(advAll);
+      setPendingOps(pend);
     } finally {
       setLoading(false);
     }
+  };
+
+  const approveOp = async (id: string) => {
+    if (!confirm('¿Aprobar esta venta? Se generan las comisiones automáticamente.')) return;
+    await operationsApi.approve(id, currentUser.id);
+    await refresh();
+  };
+
+  const rejectOp = async () => {
+    if (!rejectModal) return;
+    if (!rejectModal.reason.trim()) {
+      alert('Tenés que escribir un motivo del rechazo.');
+      return;
+    }
+    await operationsApi.reject(rejectModal.op.id, rejectModal.reason.trim(), currentUser.id);
+    setRejectModal(null);
+    await refresh();
   };
 
   useEffect(() => { void refresh(); }, [yearMonth]);
@@ -109,15 +132,13 @@ export default function Payroll() {
 
   const grand = useMemo(() => {
     const totalUsd = rows.reduce((s, r) => s + r.totalUsd, 0);
-    const totalSalaryArs = rows.reduce((s, r) => s + Number(r.agent.base_salary_ars), 0);
     const totalCommArs = totalUsd * rate;
     const totalAdvancesArs = rows.reduce((s, r) => s + r.advancesArs, 0);
     return {
       totalUsd,
-      totalSalaryArs,
       totalCommArs,
       totalAdvancesArs,
-      total: totalSalaryArs + totalCommArs - totalAdvancesArs,
+      total: totalCommArs - totalAdvancesArs,
       pendingUsd: rows.reduce((s, r) => s + r.totalUsdPending, 0),
     };
   }, [rows, rate]);
@@ -209,13 +230,14 @@ export default function Payroll() {
       {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="bg-white border border-border rounded-2xl p-5">
+          <div className="text-muted text-xs uppercase tracking-wider mb-1">Ventas pendientes</div>
+          <div className="text-2xl font-bold text-amber-700">{pendingOps.length}</div>
+          <div className="text-xs text-muted mt-0.5">de aprobación</div>
+        </div>
+        <div className="bg-white border border-border rounded-2xl p-5">
           <div className="text-muted text-xs uppercase tracking-wider mb-1">Comisiones del mes</div>
           <div className="text-2xl font-bold text-[#0F172A]">{fmtUSD(grand.totalUsd)}</div>
           <div className="text-xs text-muted mt-0.5">≈ {fmtARS(grand.totalCommArs)}</div>
-        </div>
-        <div className="bg-white border border-border rounded-2xl p-5">
-          <div className="text-muted text-xs uppercase tracking-wider mb-1">Sueldos fijos</div>
-          <div className="text-2xl font-bold text-[#0F172A]">{fmtARS(grand.totalSalaryArs)}</div>
         </div>
         <div className="bg-white border border-border rounded-2xl p-5">
           <div className="text-muted text-xs uppercase tracking-wider mb-1">Adelantos del mes</div>
@@ -226,6 +248,50 @@ export default function Payroll() {
           <div className="text-2xl font-bold text-crimson">{fmtARS(grand.total)}</div>
         </div>
       </div>
+
+      {/* Operaciones pendientes de aprobación */}
+      {pendingOps.length > 0 && (
+        <div className="bg-amber-50 border border-amber-300 rounded-2xl p-5">
+          <h3 className="text-sm font-semibold text-amber-900 mb-3">
+            Ventas pendientes de aprobación ({pendingOps.length})
+          </h3>
+          <div className="space-y-2">
+            {pendingOps.map(op => {
+              const turdo = Number(op.precio_venta_usd) * Number(op.agency_commission_pct ?? 6) / 100;
+              const pct = op.orden_estimado === 1 ? 20 : op.orden_estimado === 2 ? 25 : 30;
+              const agente = turdo * pct / 100;
+              return (
+                <div key={op.id} className="bg-white border border-amber-200 rounded-xl p-3 flex items-center justify-between gap-3 flex-wrap">
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium text-[#0F172A]">
+                      {op.vendedor_name ?? '—'} · {op.property_address ?? 'Sin dirección'}
+                    </div>
+                    <div className="text-xs text-muted mt-0.5">
+                      Boleto {fmtDate(op.fecha_boleto)} · <span className="font-semibold">{fmtUSD(Number(op.precio_venta_usd))}</span>
+                      {' '}· sería la <strong>#{op.orden_estimado}</strong> del mes ({pct}%) → comisión <strong>{fmtUSD(agente)}</strong>
+                    </div>
+                    {op.notes && <div className="text-xs italic text-muted mt-1">"{op.notes}"</div>}
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => void approveOp(op.id)}
+                      className="text-xs px-3 py-1.5 rounded-md bg-emerald-600 text-white hover:bg-emerald-700 transition-all font-medium"
+                    >
+                      Aprobar
+                    </button>
+                    <button
+                      onClick={() => setRejectModal({ op, reason: '' })}
+                      className="text-xs px-3 py-1.5 rounded-md border border-red-300 text-red-700 hover:bg-red-50 transition-all"
+                    >
+                      Rechazar
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Adelantos pendientes de aprobación */}
       {pendingAdvances.length > 0 && (
@@ -274,7 +340,6 @@ export default function Payroll() {
                 <th className="px-4 py-3 font-medium">Sucursal</th>
                 <th className="px-4 py-3 font-medium text-center">Operaciones</th>
                 <th className="px-4 py-3 font-medium text-right">Comisiones USD</th>
-                <th className="px-4 py-3 font-medium text-right">Sueldo fijo</th>
                 <th className="px-4 py-3 font-medium text-right">Total ARS</th>
                 <th className="px-4 py-3 font-medium text-center">Estado</th>
                 <th className="px-4 py-3 font-medium"></th>
@@ -282,10 +347,10 @@ export default function Payroll() {
             </thead>
             <tbody className="divide-y divide-border">
               {loading && (
-                <tr><td colSpan={8} className="px-4 py-8 text-center text-muted text-sm">Cargando…</td></tr>
+                <tr><td colSpan={7} className="px-4 py-8 text-center text-muted text-sm">Cargando…</td></tr>
               )}
               {!loading && rows.map(r => {
-                const totalArs = Number(r.agent.base_salary_ars) + r.totalUsd * rate - r.advancesArs;
+                const totalArs = r.totalUsd * rate - r.advancesArs;
                 const allPaid = r.commissions.length > 0 && r.totalUsdPending === 0;
                 const pending = r.totalUsdPending > 0;
                 return (
@@ -303,7 +368,6 @@ export default function Payroll() {
                         <div className="text-amber-600 text-xs">Pend: {fmtUSD(r.totalUsdPending)}</div>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-sm text-right tabular-nums text-[#0F172A]">{fmtARS(Number(r.agent.base_salary_ars))}</td>
                     <td className="px-4 py-3 text-sm text-right tabular-nums">
                       <div className="font-bold text-crimson">{fmtARS(totalArs)}</div>
                       {r.advancesArs > 0 && (
@@ -407,21 +471,61 @@ export default function Payroll() {
 
               <div className="bg-bg-hover rounded-xl p-3">
                 <div className="flex justify-between text-sm">
-                  <span className="text-muted">Sueldo fijo:</span>
-                  <span className="font-medium text-[#0F172A]">{fmtARS(Number(detailAgent.base_salary_ars))}</span>
-                </div>
-                <div className="flex justify-between text-sm mt-1">
                   <span className="text-muted">Comisiones (×{rate}):</span>
                   <span className="font-medium text-[#0F172A]">{fmtARS(row.totalUsd * rate)}</span>
                 </div>
+                {row.advancesArs > 0 && (
+                  <div className="flex justify-between text-sm mt-1">
+                    <span className="text-muted">Adelantos:</span>
+                    <span className="font-medium text-amber-700">- {fmtARS(row.advancesArs)}</span>
+                  </div>
+                )}
                 <div className="flex justify-between text-base mt-2 pt-2 border-t border-border">
                   <span className="font-medium text-[#0F172A]">Total a pagar:</span>
-                  <span className="font-bold text-crimson">{fmtARS(Number(detailAgent.base_salary_ars) + row.totalUsd * rate)}</span>
+                  <span className="font-bold text-crimson">{fmtARS(row.totalUsd * rate - row.advancesArs)}</span>
                 </div>
               </div>
             </div>
           );
         })()}
+      </Modal>
+
+      {/* Modal rechazar venta */}
+      <Modal open={!!rejectModal} onClose={() => setRejectModal(null)} title="Rechazar venta">
+        {rejectModal && (
+          <div className="space-y-4">
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-sm">
+              <div className="font-medium text-[#0F172A]">{rejectModal.op.vendedor_name}</div>
+              <div className="text-muted">{rejectModal.op.property_address ?? 'Sin dirección'}</div>
+              <div className="text-muted">Boleto {fmtDate(rejectModal.op.fecha_boleto)} · {fmtUSD(Number(rejectModal.op.precio_venta_usd))}</div>
+            </div>
+            <div>
+              <label className="text-sm font-medium text-[#0F172A] mb-1.5 block">Motivo del rechazo *</label>
+              <textarea
+                value={rejectModal.reason}
+                onChange={(e) => setRejectModal({ ...rejectModal, reason: e.target.value })}
+                className="w-full bg-white border border-border rounded-xl px-3 py-2 text-sm text-[#0F172A]"
+                rows={3}
+                placeholder="Ej: precio mal cargado, propiedad no era nuestra, etc."
+                autoFocus
+              />
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                onClick={() => setRejectModal(null)}
+                className="px-4 py-2 text-sm rounded-xl border border-border text-[#475569] hover:bg-bg-hover transition-all"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => void rejectOp()}
+                className="px-4 py-2 text-sm rounded-xl bg-red-600 text-white hover:bg-red-700 transition-all"
+              >
+                Rechazar venta
+              </button>
+            </div>
+          </div>
+        )}
       </Modal>
     </div>
   );

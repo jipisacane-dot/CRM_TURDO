@@ -14,6 +14,7 @@ const Team = lazy(() => import('./pages/Team'));
 const Calendar = lazy(() => import('./pages/Calendar'));
 const Analytics = lazy(() => import('./pages/Analytics'));
 const Operations = lazy(() => import('./pages/Operations'));
+const Negotiations = lazy(() => import('./pages/Negotiations'));
 const Payroll = lazy(() => import('./pages/Payroll'));
 const MyCommissions = lazy(() => import('./pages/MyCommissions'));
 const Finanzas = lazy(() => import('./pages/Finanzas'));
@@ -39,6 +40,7 @@ export default function App() {
               <Route path="/leads"       element={<AppLayout><Leads /></AppLayout>} />
               <Route path="/properties"  element={<AppLayout><Properties /></AppLayout>} />
               <Route path="/operations"  element={<AppLayout><Operations /></AppLayout>} />
+              <Route path="/negotiations" element={<AppLayout><Negotiations /></AppLayout>} />
               <Route path="/payroll"     element={<AppLayout><Payroll /></AppLayout>} />
               <Route path="/my-commissions" element={<AppLayout><MyCommissions /></AppLayout>} />
               <Route path="/finanzas"    element={<AppLayout><Finanzas /></AppLayout>} />
