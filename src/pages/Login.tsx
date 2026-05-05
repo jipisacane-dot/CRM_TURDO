@@ -26,15 +26,17 @@ export default function Login() {
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
-    if (!email || !password) { setError('Completá todos los campos'); return; }
+    const cleanPassword = password.trim();
+    const cleanEmail = email.trim().toLowerCase();
+    if (!cleanEmail || !cleanPassword) { setError('Completá todos los campos'); return; }
     setLoading(true);
-    await new Promise(r => setTimeout(r, 600));
-    if (password === 'turdo2024' || password === '1234') {
-      const cleanEmail = email.trim().toLowerCase();
+    await new Promise(r => setTimeout(r, 400));
+    const validPasswords = ['turdo2024', 'Turdo2024', '1234'];
+    if (validPasswords.includes(cleanPassword)) {
       const agent = AGENTS.find(a => a.email.toLowerCase() === cleanEmail);
       if (!agent) {
         setLoading(false);
-        setError(`No encontramos un usuario con ese email. Verificá la dirección.`);
+        setError('No encontramos un usuario con ese email. Verificá la dirección.');
         return;
       }
       const session = { email: agent.email, agentId: agent.id, exp: Date.now() + 8 * 60 * 60 * 1000 };
@@ -43,7 +45,7 @@ export default function Login() {
       window.location.href = '/';
     } else {
       setLoading(false);
-      setError('Credenciales incorrectas');
+      setError(`Contraseña incorrecta. Usá "turdo2024" (sin comillas).`);
     }
   };
 
