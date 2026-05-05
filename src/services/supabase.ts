@@ -61,20 +61,35 @@ export const db = {
       return data ?? [];
     },
 
-    async listWithMessages(): Promise<Array<DBContact & { messages: DBMessage[] }>> {
-      const [{ data: contacts, error: ce }, { data: messages, error: me }] = await Promise.all([
-        supabase.from('contacts').select('*').order('created_at', { ascending: false }),
-        supabase.from('messages').select('*').order('created_at', { ascending: true }),
-      ]);
+    async listWithMessages(opts?: { agentId?: string }): Promise<Array<DBContact & { messages: DBMessage[] }>> {
+      // Si se pasa agentId, filtrar contactos asignados a ese agente (server-side).
+      // Si no, traer todo (admin).
+      let contactsQuery = supabase.from('contacts').select('*').order('created_at', { ascending: false });
+      if (opts?.agentId) {
+        contactsQuery = contactsQuery.eq('assigned_to', opts.agentId);
+      }
+      const { data: contacts, error: ce } = await contactsQuery;
       if (ce) throw ce;
+
+      const contactList = (contacts ?? []) as DBContact[];
+      if (contactList.length === 0) return [];
+
+      // Solo traer mensajes de esos contactos (no toda la tabla)
+      const ids = contactList.map(c => c.id);
+      const { data: messages, error: me } = await supabase
+        .from('messages')
+        .select('*')
+        .in('contact_id', ids)
+        .order('created_at', { ascending: true });
       if (me) throw me;
+
       const msgByContact = new Map<string, DBMessage[]>();
       for (const m of (messages ?? []) as DBMessage[]) {
         const arr = msgByContact.get(m.contact_id) ?? [];
         arr.push(m);
         msgByContact.set(m.contact_id, arr);
       }
-      return (contacts ?? []).map((c: DBContact) => ({
+      return contactList.map((c: DBContact) => ({
         ...c,
         messages: msgByContact.get(c.id) ?? [],
       }));

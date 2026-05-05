@@ -77,14 +77,17 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const refreshLeads = useCallback(async () => {
     setLoading(true);
     try {
-      const contacts = await db.contacts.listWithMessages();
+      // Vendedores solo ven sus contactos asignados (filtro server-side).
+      // Admin (Leticia) ve todo.
+      const opts = currentUser.role === 'agent' ? { agentId: currentUser.id } : undefined;
+      const contacts = await db.contacts.listWithMessages(opts);
       setLeads(contacts.map(c => toLead(c, c.messages)));
     } catch (e) {
       console.error('Error cargando leads:', e);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [currentUser.id, currentUser.role]);
 
   const refreshReminders = useCallback(async () => {
     try {

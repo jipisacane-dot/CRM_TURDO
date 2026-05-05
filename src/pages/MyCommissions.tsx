@@ -37,11 +37,11 @@ export default function MyCommissions() {
     const [cs, ads, ops] = await Promise.all([
       commissionsApi.listForAgent(agentId),
       advancesApi.listForAgent(agentId),
-      operationsApi.listWithRefs(),
+      operationsApi.listWithRefs({ vendedorId: agentId }),
     ]);
     setAllCommissions(cs);
     setAdvances(ads);
-    setMyOperations(ops.filter(o => o.vendedor_id === agentId));
+    setMyOperations(ops);
   };
 
   useEffect(() => {

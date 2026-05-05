@@ -175,8 +175,8 @@ export const propertiesApi = {
 // ── Operations ───────────────────────────────────────────────────────────────
 
 export const operationsApi = {
-  async listWithRefs(): Promise<OperationWithRefs[]> {
-    const { data, error } = await supabase
+  async listWithRefs(opts?: { vendedorId?: string }): Promise<OperationWithRefs[]> {
+    let query = supabase
       .from('operations')
       .select(`
         *,
@@ -186,6 +186,10 @@ export const operationsApi = {
         contact:contacts(id, name, phone, email, channel, status, notes)
       `)
       .order('fecha_boleto', { ascending: false });
+    if (opts?.vendedorId) {
+      query = query.eq('vendedor_id', opts.vendedorId);
+    }
+    const { data, error } = await query;
     if (error) throw error;
     return (data ?? []) as unknown as OperationWithRefs[];
   },
