@@ -9,6 +9,7 @@ import { ReminderModal } from '../components/ui/ReminderModal';
 import TemplatePicker from '../components/TemplatePicker';
 import ReplySuggestions from '../components/ReplySuggestions';
 import ClientPortalButton from '../components/ClientPortalButton';
+import QualityBadge, { QualityFilter } from '../components/ui/QualityBadge';
 import { pipelineStagesApi, pipelineApi, type PipelineStage } from '../services/pipeline';
 import type { Channel, Lead } from '../types';
 import { formatDistanceToNow, format } from 'date-fns';
@@ -40,6 +41,7 @@ export default function Inbox() {
   const { leads, assignLead, sendMessage, loading, dueReminders, completeReminder, currentUser, refreshLeads } = useApp();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [channelFilter, setChannelFilter] = useState<Channel | 'all'>('all');
+  const [qualityFilter, setQualityFilter] = useState<'all' | 'hot' | 'warm' | 'cold' | 'unrated'>('all');
   const [reply, setReply] = useState('');
   const [showAssign, setShowAssign] = useState(false);
   const [showReminder, setShowReminder] = useState(false);
@@ -80,6 +82,8 @@ export default function Inbox() {
 
   const filtered = scope
     .filter(l => channelFilter === 'all' || l.channel === channelFilter)
+    .filter(l => qualityFilter === 'all' ||
+      (qualityFilter === 'unrated' ? !l.quality_label : l.quality_label === qualityFilter))
     .filter(l => !search || l.name.toLowerCase().includes(search.toLowerCase()) || (l.propertyTitle ?? '').toLowerCase().includes(search.toLowerCase()))
     .sort((a, b) => new Date(b.lastActivity).getTime() - new Date(a.lastActivity).getTime());
 
@@ -165,6 +169,9 @@ export default function Inbox() {
               </button>
             ))}
           </div>
+          <div className="overflow-x-auto pb-1 scrollbar-hide">
+            <QualityFilter selected={qualityFilter} onSelect={setQualityFilter} />
+          </div>
         </div>
 
         <div className="flex-1 overflow-y-auto">
@@ -189,7 +196,10 @@ export default function Inbox() {
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between gap-1">
-                    <span className={`text-sm font-medium truncate ${unread > 0 ? 'text-white' : 'text-gray-300'}`}>{lead.name}</span>
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span className={`text-sm font-medium truncate ${unread > 0 ? 'text-white' : 'text-gray-300'}`}>{lead.name}</span>
+                      <QualityBadge lead={lead} size="sm" />
+                    </div>
                     <span className="text-muted text-[10px] flex-shrink-0">{formatDistanceToNow(new Date(lead.lastActivity), { locale: es, addSuffix: false })}</span>
                   </div>
                   <div className="flex items-center gap-1 mt-0.5">
@@ -221,6 +231,7 @@ export default function Inbox() {
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2">
                 <span className="text-white font-semibold truncate">{selected.name}</span>
+                <QualityBadge lead={selected} size="md" showLabel />
                 {selected.duplicate_of && (() => {
                   const original = leads.find(l => l.id === selected.duplicate_of);
                   return (

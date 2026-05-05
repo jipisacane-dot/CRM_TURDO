@@ -209,6 +209,14 @@ Deno.serve(async (req) => {
     });
   }
 
+  // Si pasamos a en_conversacion o más adelante, disparamos qualify-lead fire-and-forget
+  // (la qualify se autoexcluye si no hay suficientes mensajes)
+  if (['en_conversacion', 'visita_programada', 'propuesta_enviada', 'en_negociacion'].includes(result.detected_stage)) {
+    sb.functions.invoke('qualify-lead', {
+      body: { contact_id },
+    }).catch((e: unknown) => console.error('qualify-lead invoke err', e));
+  }
+
   return new Response(JSON.stringify({
     changed: true,
     from: currentStage,

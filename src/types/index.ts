@@ -54,6 +54,9 @@ export interface Lead {
   current_stage_key?: string;
   stage_changed_at?: string;
   duplicate_of?: string | null;
+  quality_label?: 'hot' | 'warm' | 'cold' | null;
+  quality_score?: number | null;
+  quality_reason?: string | null;
 }
 
 export interface PortalStat {

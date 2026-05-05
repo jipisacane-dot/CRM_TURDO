@@ -17,7 +17,7 @@ const toMessages = (rows: DBMessage[], channel: string) =>
     read: m.read,
   }));
 
-const toLead = (c: DBContact & { current_stage_key?: string | null; stage_changed_at?: string | null; duplicate_of?: string | null }, messages: DBMessage[]): Lead => ({
+const toLead = (c: DBContact & { current_stage_key?: string | null; stage_changed_at?: string | null; duplicate_of?: string | null; quality_label?: string | null; quality_score?: number | null; quality_reason?: string | null }, messages: DBMessage[]): Lead => ({
   id: c.id,
   name: c.name ?? 'Sin nombre',
   phone: c.phone ?? undefined,
@@ -36,6 +36,9 @@ const toLead = (c: DBContact & { current_stage_key?: string | null; stage_change
   current_stage_key: c.current_stage_key ?? 'nuevo',
   stage_changed_at: c.stage_changed_at ?? undefined,
   duplicate_of: c.duplicate_of ?? undefined,
+  quality_label: (c.quality_label as Lead['quality_label']) ?? undefined,
+  quality_score: c.quality_score ?? undefined,
+  quality_reason: c.quality_reason ?? undefined,
 });
 
 // ── Context ───────────────────────────────────────────────────────────────────
