@@ -135,8 +135,10 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   useEffect(() => {
     refreshLeads();
     refreshReminders();
-    // Pre-warm Tokko cache in background so Properties page loads instantly
-    if (tokko.hasKey()) tokko.getProperties().catch(() => {});
+    // Pre-warm Tokko cache pero diferido para no competir con la carga inicial
+    if (tokko.hasKey()) {
+      setTimeout(() => { tokko.getProperties().catch(() => {}); }, 1500);
+    }
   }, [refreshLeads, refreshReminders]);
 
   // Check reminders every 5 min

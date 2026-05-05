@@ -1,5 +1,41 @@
 import { supabase } from './supabase';
 
+// ── In-memory cache with TTL + dedup de in-flight requests ─────────────────
+// Para listas compartidas que múltiples páginas piden simultáneamente.
+// Evita 5 round trips paralelos cuando el user cambia de página rápido.
+type CacheEntry<T> = { data: T; ts: number };
+const CACHE_TTL_MS = 30_000; // 30s — fresh enough para no quedar atrás
+const _cache = new Map<string, CacheEntry<unknown>>();
+const _inflight = new Map<string, Promise<unknown>>();
+
+async function cached<T>(key: string, loader: () => Promise<T>): Promise<T> {
+  const hit = _cache.get(key) as CacheEntry<T> | undefined;
+  if (hit && Date.now() - hit.ts < CACHE_TTL_MS) return hit.data;
+  const flying = _inflight.get(key) as Promise<T> | undefined;
+  if (flying) return flying;
+  const p = loader().then(data => {
+    _cache.set(key, { data, ts: Date.now() });
+    _inflight.delete(key);
+    return data;
+  }).catch(e => {
+    _inflight.delete(key);
+    throw e;
+  });
+  _inflight.set(key, p);
+  return p;
+}
+
+/** Invalidar manualmente cuando creamos/editamos algo, para forzar refetch */
+export function invalidateCache(prefix?: string) {
+  if (!prefix) {
+    _cache.clear();
+    return;
+  }
+  for (const k of Array.from(_cache.keys())) {
+    if (k.startsWith(prefix)) _cache.delete(k);
+  }
+}
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export interface DBAgent {
@@ -122,18 +158,21 @@ export interface CommissionWithRefs extends DBCommission {
 
 export const agentsApi = {
   async list(): Promise<DBAgent[]> {
-    const { data, error } = await supabase
-      .from('agents')
-      .select('*')
-      .eq('active', true)
-      .order('role')
-      .order('name');
-    if (error) throw error;
-    return data ?? [];
+    return cached('agents:list', async () => {
+      const { data, error } = await supabase
+        .from('agents')
+        .select('*')
+        .eq('active', true)
+        .order('role')
+        .order('name');
+      if (error) throw error;
+      return data ?? [];
+    });
   },
   async update(id: string, fields: Partial<DBAgent>): Promise<void> {
     const { error } = await supabase.from('agents').update(fields).eq('id', id);
     if (error) throw error;
+    invalidateCache('agents:');
   },
 };
 
@@ -141,21 +180,25 @@ export const agentsApi = {
 
 export const propertiesApi = {
   async list(): Promise<DBProperty[]> {
-    const { data, error } = await supabase
-      .from('properties')
-      .select('*')
-      .order('created_at', { ascending: false });
-    if (error) throw error;
-    return data ?? [];
+    return cached('properties:list', async () => {
+      const { data, error } = await supabase
+        .from('properties')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      return data ?? [];
+    });
   },
   async create(p: Omit<DBProperty, 'id' | 'created_at' | 'updated_at'>): Promise<DBProperty> {
     const { data, error } = await supabase.from('properties').insert(p).select().single();
     if (error) throw error;
+    invalidateCache('properties:');
     return data;
   },
   async update(id: string, fields: Partial<DBProperty>): Promise<void> {
     const { error } = await supabase.from('properties').update(fields).eq('id', id);
     if (error) throw error;
+    invalidateCache('properties:');
   },
   async uploadCoverPhoto(propertyId: string, file: File): Promise<string> {
     const cleanName = file.name.replace(/[^a-zA-Z0-9.\-_]/g, '_');
@@ -176,35 +219,42 @@ export const propertiesApi = {
 
 export const operationsApi = {
   async listWithRefs(opts?: { vendedorId?: string }): Promise<OperationWithRefs[]> {
-    let query = supabase
-      .from('operations')
-      .select(`
-        *,
-        property:properties(*),
-        vendedor:agents!operations_vendedor_id_fkey(*),
-        captador:agents!operations_captador_id_fkey(*),
-        contact:contacts(id, name, phone, email, channel, status, notes)
-      `)
-      .order('fecha_boleto', { ascending: false });
-    if (opts?.vendedorId) {
-      query = query.eq('vendedor_id', opts.vendedorId);
-    }
-    const { data, error } = await query;
-    if (error) throw error;
-    return (data ?? []) as unknown as OperationWithRefs[];
+    const key = `operations:listWithRefs:${opts?.vendedorId ?? 'all'}`;
+    return cached(key, async () => {
+      let query = supabase
+        .from('operations')
+        .select(`
+          *,
+          property:properties(*),
+          vendedor:agents!operations_vendedor_id_fkey(*),
+          captador:agents!operations_captador_id_fkey(*),
+          contact:contacts(id, name, phone, email, channel, status, notes)
+        `)
+        .order('fecha_boleto', { ascending: false });
+      if (opts?.vendedorId) {
+        query = query.eq('vendedor_id', opts.vendedorId);
+      }
+      const { data, error } = await query;
+      if (error) throw error;
+      return (data ?? []) as unknown as OperationWithRefs[];
+    });
   },
   async create(op: Omit<DBOperation, 'id' | 'created_at' | 'updated_at'>): Promise<DBOperation> {
     const { data, error } = await supabase.from('operations').insert(op).select().single();
     if (error) throw error;
+    invalidateCache('operations:');
+    invalidateCache('properties:');
     return data;
   },
   async update(id: string, fields: Partial<DBOperation>): Promise<void> {
     const { error } = await supabase.from('operations').update(fields).eq('id', id);
     if (error) throw error;
+    invalidateCache('operations:');
   },
   async remove(id: string): Promise<void> {
     const { error } = await supabase.from('operations').delete().eq('id', id);
     if (error) throw error;
+    invalidateCache('operations:');
   },
   async approve(id: string, approvedBy: string | null): Promise<void> {
     const { error } = await supabase.from('operations').update({
@@ -213,6 +263,7 @@ export const operationsApi = {
       rejected_reason: null,
     }).eq('id', id);
     if (error) throw error;
+    invalidateCache('operations:');
   },
   async reject(id: string, reason: string, approvedBy: string | null): Promise<void> {
     const { error } = await supabase.from('operations').update({
@@ -221,26 +272,31 @@ export const operationsApi = {
       rejected_reason: reason,
     }).eq('id', id);
     if (error) throw error;
+    invalidateCache('operations:');
   },
   async markPaid(id: string): Promise<void> {
     const { error } = await supabase.from('operations').update({
       paid_at: new Date().toISOString(),
     }).eq('id', id);
     if (error) throw error;
+    invalidateCache('operations:');
   },
   async markUnpaid(id: string): Promise<void> {
     const { error } = await supabase.from('operations').update({
       paid_at: null,
     }).eq('id', id);
     if (error) throw error;
+    invalidateCache('operations:');
   },
   async listPendingApproval(): Promise<PendingApprovalRow[]> {
-    const { data, error } = await supabase
-      .from('v_operations_pending_approval')
-      .select('*')
-      .order('created_at', { ascending: true });
-    if (error) throw error;
-    return (data ?? []) as PendingApprovalRow[];
+    return cached('operations:pendingApproval', async () => {
+      const { data, error } = await supabase
+        .from('v_operations_pending_approval')
+        .select('*')
+        .order('created_at', { ascending: true });
+      if (error) throw error;
+      return (data ?? []) as PendingApprovalRow[];
+    });
   },
   async events(operationId: string): Promise<DBOperationEvent[]> {
     const { data, error } = await supabase
@@ -278,11 +334,13 @@ export interface PendingApprovalRow {
 
 export const pipelineApi = {
   async summary(): Promise<PipelineSummary[]> {
-    const { data, error } = await supabase
-      .from('v_pipeline_summary')
-      .select('*');
-    if (error) throw error;
-    return (data ?? []) as PipelineSummary[];
+    return cached('pipeline:summary', async () => {
+      const { data, error } = await supabase
+        .from('v_pipeline_summary')
+        .select('*');
+      if (error) throw error;
+      return (data ?? []) as PipelineSummary[];
+    });
   },
 };
 
@@ -537,13 +595,15 @@ export interface ContactLite {
 
 export const contactsLiteApi = {
   async list(): Promise<ContactLite[]> {
-    const { data, error } = await supabase
-      .from('contacts')
-      .select('id, name, phone, email, channel, status, notes')
-      .order('updated_at', { ascending: false })
-      .limit(500);
-    if (error) throw error;
-    return data ?? [];
+    return cached('contactsLite:list', async () => {
+      const { data, error } = await supabase
+        .from('contacts')
+        .select('id, name, phone, email, channel, status, notes')
+        .order('updated_at', { ascending: false })
+        .limit(500);
+      if (error) throw error;
+      return data ?? [];
+    });
   },
 };
 
