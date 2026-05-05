@@ -6,6 +6,7 @@ import { StatusBadge } from '../components/ui/StatusBadge';
 import { Avatar } from '../components/ui/Avatar';
 import { Modal } from '../components/ui/Modal';
 import { ReminderModal } from '../components/ui/ReminderModal';
+import TemplatePicker from '../components/TemplatePicker';
 import { pipelineStagesApi, pipelineApi, type PipelineStage } from '../services/pipeline';
 import type { Channel, Lead } from '../types';
 import { formatDistanceToNow, format } from 'date-fns';
@@ -302,6 +303,11 @@ export default function Inbox() {
               </div>
             )}
             <div className="flex gap-2 items-end">
+              <TemplatePicker
+                lead={selected}
+                agent={currentUser}
+                onPick={rendered => setReply(prev => prev ? `${prev}\n${rendered}` : rendered)}
+              />
               <textarea
                 value={reply}
                 onChange={e => { setReply(e.target.value); if (sendError) setSendError(null); }}

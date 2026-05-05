@@ -56,6 +56,7 @@ const NAV: NavItem[] = [
   { to: '/calendar',        iconKey: 'calendar',    label: 'Calendario'  },
   { to: '/analytics',       iconKey: 'analytics',   label: 'Analíticas'  },
   { to: '/notifications',   iconKey: 'alarm',       label: 'Notificaciones', adminOnly: true },
+  { to: '/templates',       iconKey: 'inbox',       label: 'Plantillas'  },
 ];
 
 const TurdoLogo = ({ compact = false }) => (
