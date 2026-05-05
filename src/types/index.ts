@@ -51,6 +51,8 @@ export interface Lead {
   messages: Message[];
   notes?: string;
   tags?: string[];
+  current_stage_key?: string;
+  stage_changed_at?: string;
 }
 
 export interface PortalStat {

@@ -21,6 +21,8 @@ export interface DBContact {
   property_title: string | null;
   branch: string | null;
   notes: string | null;
+  current_stage_key: string | null;
+  stage_changed_at: string | null;
   created_at: string;
   updated_at: string;
 }

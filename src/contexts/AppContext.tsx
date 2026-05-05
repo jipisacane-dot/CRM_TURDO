@@ -17,7 +17,7 @@ const toMessages = (rows: DBMessage[], channel: string) =>
     read: m.read,
   }));
 
-const toLead = (c: DBContact, messages: DBMessage[]): Lead => ({
+const toLead = (c: DBContact & { current_stage_key?: string; stage_changed_at?: string }, messages: DBMessage[]): Lead => ({
   id: c.id,
   name: c.name ?? 'Sin nombre',
   phone: c.phone ?? undefined,
@@ -33,6 +33,8 @@ const toLead = (c: DBContact, messages: DBMessage[]): Lead => ({
   lastActivity: messages.length > 0 ? messages[messages.length - 1].created_at : c.created_at,
   messages: toMessages(messages, c.channel),
   notes: c.notes ?? undefined,
+  current_stage_key: c.current_stage_key ?? 'nuevo',
+  stage_changed_at: c.stage_changed_at,
 });
 
 // ── Context ───────────────────────────────────────────────────────────────────

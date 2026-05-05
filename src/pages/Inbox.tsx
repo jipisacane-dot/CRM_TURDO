@@ -6,6 +6,7 @@ import { StatusBadge } from '../components/ui/StatusBadge';
 import { Avatar } from '../components/ui/Avatar';
 import { Modal } from '../components/ui/Modal';
 import { ReminderModal } from '../components/ui/ReminderModal';
+import { pipelineStagesApi, pipelineApi, type PipelineStage } from '../services/pipeline';
 import type { Channel, Lead } from '../types';
 import { formatDistanceToNow, format } from 'date-fns';
 import { es } from 'date-fns/locale';
@@ -33,7 +34,7 @@ function LeadAvatar({ lead, size = 'md' }: { lead: Lead; size?: 'sm' | 'md' }) {
 const ALL_CHANNELS: (Channel | 'all')[] = ['all', 'whatsapp', 'instagram', 'facebook', 'email', 'web', 'zonaprop', 'argenprop'];
 
 export default function Inbox() {
-  const { leads, assignLead, sendMessage, loading, dueReminders, completeReminder, currentUser } = useApp();
+  const { leads, assignLead, sendMessage, loading, dueReminders, completeReminder, currentUser, refreshLeads } = useApp();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [channelFilter, setChannelFilter] = useState<Channel | 'all'>('all');
   const [reply, setReply] = useState('');
@@ -42,7 +43,34 @@ export default function Inbox() {
   const [search, setSearch] = useState('');
   const [sendError, setSendError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
+  const [stages, setStages] = useState<PipelineStage[]>([]);
+  const [changingStage, setChangingStage] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    void pipelineStagesApi.list().then(setStages);
+  }, []);
+
+  // Detectar ?lead=X en la URL para auto-seleccionar (viene desde Pipeline)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const leadId = params.get('lead');
+    if (leadId) setSelectedId(leadId);
+  }, []);
+
+  const changeStage = async (newKey: string) => {
+    if (!selected || changingStage) return;
+    if (selected.current_stage_key === newKey) return;
+    setChangingStage(true);
+    try {
+      await pipelineApi.changeStage(selected.id, newKey);
+      await refreshLeads();
+    } catch (e) {
+      alert('Error al cambiar etapa: ' + (e as Error).message);
+    } finally {
+      setChangingStage(false);
+    }
+  };
 
   const isAdmin = currentUser.role === 'admin';
   const scope = isAdmin ? leads : leads.filter(l => l.assignedTo === currentUser.id);
@@ -212,6 +240,33 @@ export default function Inbox() {
               </button>
             </div>
           </div>
+
+          {/* Selector de etapa pipeline */}
+          {stages.length > 0 && (
+            <div className="flex items-center gap-1.5 px-4 py-2 border-b border-border bg-bg-card overflow-x-auto flex-shrink-0">
+              <span className="text-[10px] uppercase tracking-wider text-muted font-medium mr-1 flex-shrink-0">Etapa:</span>
+              {stages.map(s => {
+                const active = selected.current_stage_key === s.key;
+                return (
+                  <button
+                    key={s.key}
+                    onClick={() => void changeStage(s.key)}
+                    disabled={changingStage}
+                    className={`flex-shrink-0 inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-medium transition-all ${
+                      active
+                        ? 'text-white shadow-sm'
+                        : 'border border-border text-muted hover:bg-bg-hover hover:text-[#0F172A]'
+                    } ${changingStage ? 'opacity-50' : ''}`}
+                    style={active ? { backgroundColor: s.color ?? '#8B1F1F' } : undefined}
+                    title={s.name}
+                  >
+                    <span>{s.icon}</span>
+                    <span>{s.name}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
 
           {/* Messages */}
           <div className="flex-1 overflow-y-auto p-4 space-y-3">
