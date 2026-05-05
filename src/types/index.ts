@@ -53,6 +53,7 @@ export interface Lead {
   tags?: string[];
   current_stage_key?: string;
   stage_changed_at?: string;
+  duplicate_of?: string | null;
 }
 
 export interface PortalStat {

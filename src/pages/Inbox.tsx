@@ -217,7 +217,21 @@ export default function Inbox() {
             <button onClick={() => setSelectedId(null)} className="md:hidden text-muted hover:text-white mr-1">←</button>
             <LeadAvatar lead={selected} size="sm" />
             <div className="flex-1 min-w-0">
-              <div className="text-white font-semibold truncate">{selected.name}</div>
+              <div className="flex items-center gap-2">
+                <span className="text-white font-semibold truncate">{selected.name}</span>
+                {selected.duplicate_of && (() => {
+                  const original = leads.find(l => l.id === selected.duplicate_of);
+                  return (
+                    <button
+                      onClick={() => original && setSelectedId(original.id)}
+                      title={`Duplicado de ${original?.name ?? 'otro lead'} — click para abrir el original`}
+                      className="text-[10px] bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full hover:bg-amber-200 flex-shrink-0"
+                    >
+                      ⚠ Duplicado de {original?.name ?? '...'}
+                    </button>
+                  );
+                })()}
+              </div>
               <div className="flex items-center gap-2 flex-wrap">
                 <ChannelIcon channel={selected.channel} size="sm" showLabel />
                 {selected.propertyTitle && <span className="text-muted text-xs truncate">{selected.propertyTitle}</span>}
