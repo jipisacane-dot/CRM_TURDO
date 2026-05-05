@@ -1,4 +1,4 @@
-import { NavLink, useNavigate } from 'react-router-dom';
+import { NavLink } from 'react-router-dom';
 import { useApp } from '../../contexts/AppContext';
 import { usePushNotifications } from '../../hooks/usePushNotifications';
 
@@ -73,7 +73,6 @@ const TurdoLogo = ({ compact = false }) => (
 
 export const Sidebar = () => {
   const { unreadCount, dueReminders, currentUser } = useApp();
-  const navigate = useNavigate();
   const { status: pushStatus, loading: pushLoading, subscribe, unsubscribe } = usePushNotifications();
   const visibleNav = NAV.filter(n =>
     (!n.adminOnly || currentUser.role === 'admin') &&
@@ -82,7 +81,8 @@ export const Sidebar = () => {
 
   const handleLogout = () => {
     localStorage.removeItem('crm_session');
-    navigate('/login', { replace: true });
+    // Hard reload para que AppContext lea sesión limpia y se vea bien el login
+    window.location.href = '/login';
   };
 
   return (

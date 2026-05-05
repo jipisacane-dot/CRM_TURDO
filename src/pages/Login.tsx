@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { AGENTS } from '../data/mock';
 
 const TurdoLogoFull = () => (
@@ -19,11 +18,10 @@ const TurdoLogoFull = () => (
 );
 
 export default function Login() {
-  const [email, setEmail] = useState('leticia@turdogroup.com');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const navigate = useNavigate();
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -31,14 +29,20 @@ export default function Login() {
     if (!email || !password) { setError('Completá todos los campos'); return; }
     setLoading(true);
     await new Promise(r => setTimeout(r, 600));
-    setLoading(false);
     if (password === 'turdo2024' || password === '1234') {
-      const agent = AGENTS.find(a => a.email.toLowerCase() === email.toLowerCase());
-      const agentId = agent?.id ?? 'leticia';
-      const session = { email, agentId, exp: Date.now() + 8 * 60 * 60 * 1000 };
+      const cleanEmail = email.trim().toLowerCase();
+      const agent = AGENTS.find(a => a.email.toLowerCase() === cleanEmail);
+      if (!agent) {
+        setLoading(false);
+        setError(`No encontramos un usuario con ese email. Verificá la dirección.`);
+        return;
+      }
+      const session = { email: agent.email, agentId: agent.id, exp: Date.now() + 8 * 60 * 60 * 1000 };
       localStorage.setItem('crm_session', JSON.stringify(session));
-      navigate('/');
+      // Hard reload para que AppContext lea la sesión fresca
+      window.location.href = '/';
     } else {
+      setLoading(false);
       setError('Credenciales incorrectas');
     }
   };
@@ -61,8 +65,9 @@ export default function Login() {
                 type="email"
                 value={email}
                 onChange={e => setEmail(e.target.value)}
-                className="w-full bg-bg-input border border-border rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-crimson transition-colors"
+                className="w-full bg-bg-input border border-border rounded-xl px-4 py-3 text-[#0F172A] text-sm outline-none focus:border-crimson transition-colors"
                 placeholder="usuario@turdogroup.com"
+                autoFocus
               />
             </div>
             <div>
@@ -71,7 +76,7 @@ export default function Login() {
                 type="password"
                 value={password}
                 onChange={e => setPassword(e.target.value)}
-                className="w-full bg-bg-input border border-border rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-crimson transition-colors"
+                className="w-full bg-bg-input border border-border rounded-xl px-4 py-3 text-[#0F172A] text-sm outline-none focus:border-crimson transition-colors"
                 placeholder="••••••••"
               />
             </div>
