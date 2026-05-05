@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Sidebar, MobileNav } from './Sidebar';
+import GlobalSearch from '../GlobalSearch';
 
 export const checkSession = () => {
   try {
@@ -33,6 +34,7 @@ export const AppLayout = ({ children }: { children: ReactNode }) => {
         {children}
       </main>
       <MobileNav />
+      <GlobalSearch />
     </div>
   );
 };
