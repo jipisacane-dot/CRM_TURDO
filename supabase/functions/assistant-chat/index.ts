@@ -234,11 +234,18 @@ Modelo de negocio:
 
 CRM en fase de desarrollo. Si tools devuelven poco, aclaralo: "se va a poblar a medida que el equipo use el sistema".
 
+CUANDO EL USUARIO PREGUNTA SOBRE TUS CAPACIDADES:
+- Si te pregunta "podrías hacer X?" / "se puede hacer Y?" / "qué cosas hacés?" → respondé DIRECTAMENTE en texto, NO uses tools.
+- Sé honesto sobre qué podés (consultar datos del CRM con tus tools) y qué NO podés todavía (acciones como asignar leads, mandar mensajes, modificar datos — eso vendría en futuras versiones).
+- Si te piden algo que no podés hacer aún, decilo claro y sugerí cómo se podría implementar a futuro.
+
 MEMORIA — usá 'recordar' y 'olvidar' proactivamente:
 - Preferencias del usuario, info del equipo, reglas aplicables a futuro → guardar SIN que te lo pidan.
 - "olvidate de X" → usar 'olvidar' con el id.
 - NO guardes datos volátiles.
-- Después de guardar mencionalo: "✓ Lo guardé en memoria".`;
+- Después de guardar mencionalo: "✓ Lo guardé en memoria".
+
+REGLA CRÍTICA: SIEMPRE respondé con texto al usuario. Aunque uses tools, después generá una respuesta en texto explicando lo que encontraste o pensás. Nunca termines sin texto.`;
 
 // ── Streaming ───────────────────────────────────────────────────────────────
 
@@ -390,8 +397,16 @@ Deno.serve(async (req: Request) => {
         const messages: ChatMessage[] = [...history, { role: 'user', content: body.question.trim() }];
 
         // Loop de tool use con streaming
+        let accumulatedText = '';
+        let lastStopReason = 'end_turn';
         for (let i = 0; i < 6; i++) {
           const { contentBlocks, stopReason } = await streamClaude(messages, systemPrompt, send);
+          lastStopReason = stopReason;
+
+          // Sumar texto acumulado de este turn
+          for (const block of contentBlocks) {
+            if (block.type === 'text' && block.text) accumulatedText += block.text;
+          }
 
           if (stopReason !== 'tool_use') break;
 
@@ -404,10 +419,18 @@ Deno.serve(async (req: Request) => {
               const result = await executeTool(block.name, block.input ?? {});
               toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: JSON.stringify(result) });
             } catch (e) {
+              console.error('Tool error', block.name, e);
               toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: JSON.stringify({ error: (e as Error).message }) });
             }
           }
           messages.push({ role: 'user', content: toolResults });
+        }
+
+        // Defensa: si terminó sin texto, pedir explícitamente una respuesta
+        if (!accumulatedText.trim()) {
+          console.log('No accumulated text after loop, retrying with explicit text request. lastStopReason:', lastStopReason);
+          messages.push({ role: 'user', content: 'Respondeme con texto a mi pregunta original, sin usar más tools. Si no podés hacer lo que te pedí, explicame por qué.' });
+          await streamClaude(messages, systemPrompt, send);
         }
 
         send('done', { ok: true });

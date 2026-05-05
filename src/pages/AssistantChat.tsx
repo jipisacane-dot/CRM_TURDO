@@ -127,7 +127,7 @@ export default function AssistantChat() {
       if (accumulated.trim()) {
         setMessages([...updated, { role: 'assistant', content: accumulated, ts: Date.now() }]);
       } else {
-        setMessages([...updated, { role: 'assistant', content: 'No pude responder, probá de nuevo.', ts: Date.now() }]);
+        setMessages([...updated, { role: 'assistant', content: 'Hubo un problema generando la respuesta. Probá reformular la pregunta o cliqueá una de las sugerencias de arriba.', ts: Date.now() }]);
       }
     } catch (e) {
       setError((e as Error).message);
