@@ -19,6 +19,7 @@ const AssistantChat = lazy(() => import('./pages/AssistantChat'));
 const Pipeline = lazy(() => import('./pages/Pipeline'));
 const NotificationRules = lazy(() => import('./pages/NotificationRules'));
 const Templates = lazy(() => import('./pages/Templates'));
+const AutoAssign = lazy(() => import('./pages/AutoAssign'));
 const Payroll = lazy(() => import('./pages/Payroll'));
 const MyCommissions = lazy(() => import('./pages/MyCommissions'));
 const Finanzas = lazy(() => import('./pages/Finanzas'));
@@ -56,6 +57,7 @@ export default function App() {
               <Route path="/analytics"   element={<AppLayout><Analytics /></AppLayout>} />
               <Route path="/notifications" element={<AppLayout><NotificationRules /></AppLayout>} />
               <Route path="/templates"   element={<AppLayout><Templates /></AppLayout>} />
+              <Route path="/auto-assign" element={<AppLayout><AutoAssign /></AppLayout>} />
               <Route path="*"            element={<Navigate to="/" />} />
             </Routes>
           </Suspense>
