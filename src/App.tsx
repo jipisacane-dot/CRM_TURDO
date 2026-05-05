@@ -21,6 +21,7 @@ const NotificationRules = lazy(() => import('./pages/NotificationRules'));
 const Templates = lazy(() => import('./pages/Templates'));
 const AutoAssign = lazy(() => import('./pages/AutoAssign'));
 const ClientPortalPreview = lazy(() => import('./pages/ClientPortalPreview'));
+const ClientPortal = lazy(() => import('./pages/ClientPortal'));
 const Payroll = lazy(() => import('./pages/Payroll'));
 const MyCommissions = lazy(() => import('./pages/MyCommissions'));
 const Finanzas = lazy(() => import('./pages/Finanzas'));
@@ -41,6 +42,7 @@ export default function App() {
             <Routes>
               <Route path="/login" element={<Login />} />
               <Route path="/preview/portal" element={<ClientPortalPreview />} />
+              <Route path="/c/:token" element={<ClientPortal />} />
               <Route path="/"            element={<AppLayout><Dashboard /></AppLayout>} />
               <Route path="/inbox"       element={<AppLayout><Inbox /></AppLayout>} />
               <Route path="/contacts"    element={<AppLayout><Contacts /></AppLayout>} />
