@@ -302,12 +302,30 @@ export const tokko = {
     }
   },
 
-  /** Buscar propiedad por código de referencia (case-insensitive). Usa la cache cargada. */
+  /**
+   * Buscar propiedad por código (case-insensitive). Intenta varios matches:
+   * 1. reference_code exacto
+   * 2. ID interno de Tokko (si es numérico)
+   * 3. reference_code que CONTIENE el código (para que TUR-2597 matchee si tipea 2597)
+   */
   async findByCode(code: string): Promise<CRMProperty | null> {
     const c = code.trim().toLowerCase();
     if (!c) return null;
     const props = await tokko.getProperties();
-    return props.find(p => p.referenceCode?.toLowerCase() === c) ?? null;
+    // 1. exact reference match
+    const exact = props.find(p => p.referenceCode?.toLowerCase() === c);
+    if (exact) return exact;
+    // 2. tokkoId match (numeric)
+    if (/^\d+$/.test(c)) {
+      const byId = props.find(p => String(p.tokkoId) === c);
+      if (byId) return byId;
+    }
+    // 3. partial reference match (sufijo o prefijo)
+    const partial = props.find(p => {
+      const ref = p.referenceCode?.toLowerCase() ?? '';
+      return ref.endsWith(c) || ref.includes(c);
+    });
+    return partial ?? null;
   },
 
   /** Post a lead/contact inquiry to a property */
