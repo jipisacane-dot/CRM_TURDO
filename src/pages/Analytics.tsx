@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { supabase } from '../services/supabase';
 import { useApp } from '../contexts/AppContext';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
@@ -421,6 +422,7 @@ export default function Analytics() {
             </div>
           </div>
         )}
+        <FalloutsAIAnalysis />
       </Section>
 
       {/* === 7. CICLO DE VENTA === */}
@@ -550,3 +552,113 @@ const Empty = ({ msg }: { msg: string }) => (
 
 // Re-export para que el lint no se queje del import (KIND_LABEL se usa en PDF)
 export { KIND_LABEL };
+
+// ── Análisis IA de caídas ─────────────────────────────────────────────────
+
+interface FalloutsAnalysis {
+  summary: string;
+  top_causes: Array<{ label: string; pct: number; action: string }>;
+  patterns: string[];
+  quick_wins: string[];
+  sample_size: number;
+}
+
+const FalloutsAIAnalysis = () => {
+  const [loading, setLoading] = useState(false);
+  const [data, setData] = useState<FalloutsAnalysis | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const run = async () => {
+    setLoading(true);
+    setError(null);
+    setData(null);
+    try {
+      const { data: res, error: fnErr } = await supabase.functions.invoke('analyze-fallouts', {
+        body: { since: new Date(Date.now() - 90 * 86400000).toISOString() },
+      });
+      if (fnErr) throw fnErr;
+      setData(res as FalloutsAnalysis);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="mt-6 pt-4 border-t border-border">
+      <div className="flex items-center justify-between gap-3 flex-wrap mb-3">
+        <div>
+          <h3 className="text-sm font-semibold text-[#0F172A] flex items-center gap-1.5">
+            <span>✨</span> Análisis con IA
+          </h3>
+          <p className="text-xs text-muted">Claude lee las caídas de los últimos 90 días y resume causas raíz + acciones.</p>
+        </div>
+        <button
+          onClick={run}
+          disabled={loading}
+          className="bg-crimson hover:bg-crimson-light text-white text-xs px-3 py-1.5 rounded-lg disabled:opacity-50"
+        >
+          {loading ? 'Pensando…' : data ? 'Re-analizar' : 'Analizar'}
+        </button>
+      </div>
+
+      {error && <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl p-3 text-sm">{error}</div>}
+
+      {data && (
+        <div className="space-y-4">
+          <div className="bg-violet-50 border border-violet-200 rounded-xl p-4">
+            <p className="text-sm text-violet-900 leading-relaxed">{data.summary}</p>
+            <p className="text-[10px] text-violet-700 mt-1">Muestra: {data.sample_size} caídas</p>
+          </div>
+
+          {data.top_causes.length > 0 && (
+            <div>
+              <h4 className="text-xs uppercase tracking-wider text-muted font-semibold mb-2">Top causas</h4>
+              <div className="space-y-2">
+                {data.top_causes.map((c, i) => (
+                  <div key={i} className="bg-white border border-border rounded-xl p-3">
+                    <div className="flex items-center justify-between gap-2 mb-1">
+                      <span className="text-sm font-medium text-[#0F172A]">{c.label}</span>
+                      <span className="text-xs font-bold text-crimson tabular-nums">{c.pct}%</span>
+                    </div>
+                    <div className="bg-bg-soft h-1.5 rounded-full overflow-hidden">
+                      <div className="bg-crimson h-full" style={{ width: `${Math.min(100, c.pct)}%` }} />
+                    </div>
+                    <p className="text-xs text-muted mt-2">→ {c.action}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {data.patterns.length > 0 && (
+            <div>
+              <h4 className="text-xs uppercase tracking-wider text-muted font-semibold mb-2">Patrones detectados</h4>
+              <ul className="space-y-1">
+                {data.patterns.map((p, i) => (
+                  <li key={i} className="text-sm text-[#0F172A] flex gap-2">
+                    <span className="text-violet-500">•</span><span>{p}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {data.quick_wins.length > 0 && (
+            <div>
+              <h4 className="text-xs uppercase tracking-wider text-muted font-semibold mb-2">Quick wins (próxima semana)</h4>
+              <ul className="space-y-1">
+                {data.quick_wins.map((q, i) => (
+                  <li key={i} className="text-sm text-[#0F172A] flex gap-2">
+                    <span className="text-emerald-500">✓</span><span>{q}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
