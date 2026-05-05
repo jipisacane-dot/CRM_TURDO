@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
 import { useApp } from '../contexts/AppContext';
-import { supabase } from '../services/supabase';
 
 interface UIMessage {
   role: 'user' | 'assistant';
@@ -39,19 +38,19 @@ export default function AssistantChat() {
   });
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [streamingText, setStreamingText] = useState('');
+  const [toolStatus, setToolStatus] = useState('');
   const [error, setError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  // Persistir en localStorage
   useEffect(() => {
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(messages)); } catch {}
   }, [messages]);
 
-  // Auto-scroll al final
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
-  }, [messages, loading]);
+  }, [messages, loading, streamingText]);
 
   const ask = async (question: string) => {
     const text = question.trim();
@@ -62,22 +61,81 @@ export default function AssistantChat() {
     setMessages(updated);
     setInput('');
     setLoading(true);
+    setStreamingText('');
+    setToolStatus('');
 
     try {
-      // Tomar últimos N mensajes como history (excluyendo el que acabamos de agregar)
       const history: ApiMessage[] = messages.slice(-MAX_HISTORY).map(m => ({ role: m.role, content: m.content }));
-      const { data, error: invokeErr } = await supabase.functions.invoke('assistant-chat', {
-        body: { history, question: text, role: currentUser.role, user_email: currentUser.email },
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
+      const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
+
+      const res = await fetch(`${supabaseUrl}/functions/v1/assistant-chat`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': anonKey,
+          'Authorization': `Bearer ${anonKey}`,
+        },
+        body: JSON.stringify({ history, question: text, role: currentUser.role, user_email: currentUser.email }),
       });
-      if (invokeErr) throw new Error(invokeErr.message);
-      if (data?.error) throw new Error(data.error);
-      const answer = data?.answer ?? 'No pude responder, probá de nuevo.';
-      setMessages([...updated, { role: 'assistant', content: answer, ts: Date.now() }]);
+
+      if (!res.ok || !res.body) {
+        const errText = await res.text();
+        throw new Error(`HTTP ${res.status}: ${errText}`);
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let accumulated = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const events = buffer.split('\n\n');
+        buffer = events.pop() ?? '';
+
+        for (const evBlock of events) {
+          if (!evBlock.trim()) continue;
+          let eventName = 'message';
+          let dataLine = '';
+          for (const ln of evBlock.split('\n')) {
+            if (ln.startsWith('event: ')) eventName = ln.slice(7).trim();
+            else if (ln.startsWith('data: ')) dataLine = ln.slice(6);
+          }
+          if (!dataLine) continue;
+          let payload: Record<string, unknown>;
+          try { payload = JSON.parse(dataLine); } catch { continue; }
+
+          if (eventName === 'text_delta') {
+            const t = (payload.text as string) ?? '';
+            accumulated += t;
+            setStreamingText(accumulated);
+            setToolStatus('');
+          } else if (eventName === 'tool_start') {
+            setToolStatus((payload.label as string) ?? 'Buscando datos…');
+          } else if (eventName === 'error') {
+            throw new Error((payload.message as string) ?? 'Error en el stream');
+          } else if (eventName === 'done') {
+            // fin del stream — fall through
+          }
+        }
+      }
+
+      // Commit del mensaje final
+      if (accumulated.trim()) {
+        setMessages([...updated, { role: 'assistant', content: accumulated, ts: Date.now() }]);
+      } else {
+        setMessages([...updated, { role: 'assistant', content: 'No pude responder, probá de nuevo.', ts: Date.now() }]);
+      }
     } catch (e) {
       setError((e as Error).message);
-      setMessages(updated); // mantenemos la pregunta del user, no la respuesta
+      setMessages(updated);
     } finally {
       setLoading(false);
+      setStreamingText('');
+      setToolStatus('');
       inputRef.current?.focus();
     }
   };
@@ -157,10 +215,18 @@ export default function AssistantChat() {
             <Bubble key={i} role={m.role} content={m.content} />
           ))
         )}
-        {loading && (
+        {loading && streamingText && (
+          <Bubble role="assistant" content={streamingText} />
+        )}
+        {loading && !streamingText && (
           <div className="flex items-center gap-2 text-muted text-sm">
             <div className="w-7 h-7 rounded-full bg-crimson/10 flex items-center justify-center text-xs">✨</div>
-            <span className="animate-pulse">Pensando…</span>
+            <span className="animate-pulse">{toolStatus || 'Pensando…'}</span>
+          </div>
+        )}
+        {loading && streamingText && toolStatus && (
+          <div className="flex items-center gap-2 text-muted text-xs ml-9">
+            <span className="animate-pulse">{toolStatus}</span>
           </div>
         )}
         {error && (
