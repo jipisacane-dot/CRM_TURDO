@@ -17,6 +17,7 @@ const Operations = lazy(() => import('./pages/Operations'));
 const Negotiations = lazy(() => import('./pages/Negotiations'));
 const AssistantChat = lazy(() => import('./pages/AssistantChat'));
 const Pipeline = lazy(() => import('./pages/Pipeline'));
+const NotificationRules = lazy(() => import('./pages/NotificationRules'));
 const Payroll = lazy(() => import('./pages/Payroll'));
 const MyCommissions = lazy(() => import('./pages/MyCommissions'));
 const Finanzas = lazy(() => import('./pages/Finanzas'));
@@ -52,6 +53,7 @@ export default function App() {
               <Route path="/team"        element={<AppLayout><Team /></AppLayout>} />
               <Route path="/calendar"    element={<AppLayout><Calendar /></AppLayout>} />
               <Route path="/analytics"   element={<AppLayout><Analytics /></AppLayout>} />
+              <Route path="/notifications" element={<AppLayout><NotificationRules /></AppLayout>} />
               <Route path="*"            element={<Navigate to="/" />} />
             </Routes>
           </Suspense>

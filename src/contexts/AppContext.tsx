@@ -17,7 +17,7 @@ const toMessages = (rows: DBMessage[], channel: string) =>
     read: m.read,
   }));
 
-const toLead = (c: DBContact & { current_stage_key?: string; stage_changed_at?: string }, messages: DBMessage[]): Lead => ({
+const toLead = (c: DBContact & { current_stage_key?: string | null; stage_changed_at?: string | null }, messages: DBMessage[]): Lead => ({
   id: c.id,
   name: c.name ?? 'Sin nombre',
   phone: c.phone ?? undefined,
