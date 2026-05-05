@@ -833,13 +833,14 @@ export default function Operations() {
                 />
               </div>
               <div>
-                <label className="text-sm font-medium text-[#0F172A] mb-1.5 block">Fecha escritura</label>
+                <label className="text-sm font-medium text-[#0F172A] mb-1.5 block">
+                  Fecha escritura {draft.status === 'boleto' && <span className="text-muted text-xs font-normal">(opcional)</span>}
+                </label>
                 <input
                   type="date"
                   value={draft.fecha_escritura}
                   onChange={(e) => setDraft({ ...draft, fecha_escritura: e.target.value })}
                   className="w-full bg-white border border-border rounded-xl px-3 py-2 text-sm text-[#0F172A]"
-                  disabled={draft.status === 'boleto'}
                 />
               </div>
             </div>
