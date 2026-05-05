@@ -105,10 +105,21 @@ export default function Payroll() {
     window.open(url, '_blank');
   };
 
+  // currentUser.id viene del mock (string como 'leticia'); el campo approved_by
+  // de la DB es UUID. Resolver al UUID real desde la tabla agents por email.
+  const myAgentUuid = useMemo(
+    () => agents.find(a => a.email.toLowerCase() === currentUser.email.toLowerCase())?.id ?? null,
+    [agents, currentUser.email],
+  );
+
   const approveOp = async (id: string) => {
     if (!confirm('¿Aprobar esta venta? Se generan las comisiones automáticamente.')) return;
-    await operationsApi.approve(id, currentUser.id);
-    await refresh();
+    try {
+      await operationsApi.approve(id, myAgentUuid);
+      await refresh();
+    } catch (e) {
+      alert('Error al aprobar: ' + (e as Error).message);
+    }
   };
 
   const rejectOp = async () => {
@@ -117,9 +128,13 @@ export default function Payroll() {
       alert('Tenés que escribir un motivo del rechazo.');
       return;
     }
-    await operationsApi.reject(rejectModal.op.id, rejectModal.reason.trim(), currentUser.id);
-    setRejectModal(null);
-    await refresh();
+    try {
+      await operationsApi.reject(rejectModal.op.id, rejectModal.reason.trim(), myAgentUuid);
+      setRejectModal(null);
+      await refresh();
+    } catch (e) {
+      alert('Error al rechazar: ' + (e as Error).message);
+    }
   };
 
   useEffect(() => { void refresh(); }, [yearMonth]);
@@ -156,7 +171,7 @@ export default function Payroll() {
       ? (prompt('Motivo del rechazo (opcional):') ?? undefined)
       : undefined;
     await advancesApi.resolve(id, status, {
-      resolvedBy: currentUser.id,
+      resolvedBy: myAgentUuid,
       note,
       appliedToMonth,
       exchangeRate: rate,
@@ -183,7 +198,7 @@ export default function Payroll() {
     const ids = row.commissions.filter(c => !c.paid).map(c => c.id);
     if (ids.length === 0) return;
     if (!confirm(`Marcar ${ids.length} comisión(es) como pagada(s) a ${agent.name}?`)) return;
-    await commissionsApi.markPaid(ids, currentUser.id);
+    await commissionsApi.markPaid(ids, myAgentUuid);
     await refresh();
   };
 
@@ -191,7 +206,7 @@ export default function Payroll() {
     if (commission.paid) {
       await commissionsApi.markUnpaid([commission.id]);
     } else {
-      await commissionsApi.markPaid([commission.id], currentUser.id);
+      await commissionsApi.markPaid([commission.id], myAgentUuid);
     }
     await refresh();
   };
