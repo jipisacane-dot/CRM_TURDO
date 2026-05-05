@@ -26,6 +26,7 @@ const ICONS = {
   finanzas:  'M12 2v20M5 9h14a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2zM3 9V7a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v2',
   alarm:     'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 7v5l3 3M5 3 2 6M19 3l3 3',
   handshake: 'M11 17l-2-2m2 2l4-4m-4 4l-4-4m4 4V3M7 7l5 5 5-5',
+  sparkle:   'M12 2l2.4 7.2L22 12l-7.6 2.8L12 22l-2.4-7.2L2 12l7.6-2.8L12 2z',
 };
 
 type NavItem = {
@@ -44,6 +45,7 @@ const NAV: NavItem[] = [
   { to: '/properties',      iconKey: 'properties',  label: 'Propiedades' },
   { to: '/operations',      iconKey: 'operations',  label: 'Operaciones' },
   { to: '/negotiations',    iconKey: 'handshake',   label: 'Negociaciones' },
+  { to: '/asistente',       iconKey: 'sparkle',     label: 'Asistente IA', adminOnly: true },
   { to: '/payroll',         iconKey: 'money',       label: 'Liquidación', adminOnly: true },
   { to: '/finanzas',        iconKey: 'finanzas',    label: 'Finanzas', adminOnly: true },
   { to: '/vencimientos',    iconKey: 'alarm',       label: 'Vencimientos', adminOnly: true },
