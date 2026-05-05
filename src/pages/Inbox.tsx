@@ -7,6 +7,7 @@ import { Avatar } from '../components/ui/Avatar';
 import { Modal } from '../components/ui/Modal';
 import { ReminderModal } from '../components/ui/ReminderModal';
 import TemplatePicker from '../components/TemplatePicker';
+import ReplySuggestions from '../components/ReplySuggestions';
 import { pipelineStagesApi, pipelineApi, type PipelineStage } from '../services/pipeline';
 import type { Channel, Lead } from '../types';
 import { formatDistanceToNow, format } from 'date-fns';
@@ -321,6 +322,11 @@ export default function Inbox() {
                 lead={selected}
                 agent={currentUser}
                 onPick={rendered => setReply(prev => prev ? `${prev}\n${rendered}` : rendered)}
+              />
+              <ReplySuggestions
+                lead={selected}
+                agent={currentUser}
+                onPick={text => setReply(text)}
               />
               <textarea
                 value={reply}
