@@ -67,7 +67,7 @@ export default function AssistantChat() {
       // Tomar últimos N mensajes como history (excluyendo el que acabamos de agregar)
       const history: ApiMessage[] = messages.slice(-MAX_HISTORY).map(m => ({ role: m.role, content: m.content }));
       const { data, error: invokeErr } = await supabase.functions.invoke('assistant-chat', {
-        body: { history, question: text, role: currentUser.role },
+        body: { history, question: text, role: currentUser.role, user_email: currentUser.email },
       });
       if (invokeErr) throw new Error(invokeErr.message);
       if (data?.error) throw new Error(data.error);

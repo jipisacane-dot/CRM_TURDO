@@ -114,9 +114,37 @@ const TOOLS = [
     description: 'Devuelve un resumen general del estado del CRM: totales de contactos, mensajes, propiedades, operaciones, comisiones del mes.',
     input_schema: { type: 'object', properties: {} },
   },
+  {
+    name: 'recordar',
+    description: 'Guardá un dato importante en la memoria persistente para recordarlo en conversaciones futuras. Usalo cuando el usuario te diga preferencias ("siempre quiero X"), info del equipo ("Gian se especializa en Y"), reglas de negocio o decisiones que apliquen a futuras consultas. NO uses para datos volátiles tipo conteos del día.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        category: {
+          type: 'string',
+          enum: ['preference', 'team', 'business', 'deadline', 'general'],
+          description: 'Categoría: preference (cómo le gusta ver datos), team (info de vendedores), business (reglas del negocio), deadline (fechas/eventos), general (otro).',
+        },
+        content: { type: 'string', description: 'El hecho a recordar, conciso y autocontenido. Ej: "Leti prefiere ver montos en USD y ARS a la cotización 1300".' },
+        importance: { type: 'number', description: 'Importancia 1-5 (5 = crítica). Default 3.' },
+      },
+      required: ['category', 'content'],
+    },
+  },
+  {
+    name: 'olvidar',
+    description: 'Borrá un hecho de la memoria por su id. Usalo si el usuario te dice "olvidate eso" o "ya no aplica".',
+    input_schema: {
+      type: 'object',
+      properties: { memory_id: { type: 'string', description: 'UUID de la memoria a borrar.' } },
+      required: ['memory_id'],
+    },
+  },
 ];
 
 // ── Implementación de cada tool ──────────────────────────────────────────────
+
+let _currentUserEmail = ''; // se setea por request
 
 async function executeTool(name: string, input: Record<string, unknown>): Promise<unknown> {
   switch (name) {
@@ -274,14 +302,53 @@ async function executeTool(name: string, input: Record<string, unknown>): Promis
         vendedores_activos: agents.count ?? 0,
       };
     }
+    case 'recordar': {
+      const cat = (input.category as string) ?? 'general';
+      const content = (input.content as string) ?? '';
+      const importance = Number(input.importance ?? 3);
+      if (!content.trim()) return { error: 'content vacío' };
+      const { data, error } = await sb
+        .from('assistant_memories')
+        .insert({ user_email: _currentUserEmail, category: cat, content: content.trim(), importance })
+        .select('id, content, category')
+        .single();
+      if (error) throw error;
+      return { saved: true, memory: data };
+    }
+    case 'olvidar': {
+      const id = input.memory_id as string;
+      if (!id) return { error: 'memory_id requerido' };
+      const { error } = await sb
+        .from('assistant_memories')
+        .delete()
+        .eq('id', id)
+        .eq('user_email', _currentUserEmail);
+      if (error) throw error;
+      return { deleted: true, id };
+    }
     default:
       return { error: `Tool desconocida: ${name}` };
   }
 }
 
+async function loadMemories(userEmail: string): Promise<Array<{ id: string; category: string; content: string; importance: number }>> {
+  const { data, error } = await sb
+    .from('assistant_memories')
+    .select('id, category, content, importance')
+    .eq('user_email', userEmail)
+    .order('importance', { ascending: false })
+    .order('updated_at', { ascending: false })
+    .limit(40);
+  if (error) {
+    console.error('Error cargando memorias', error);
+    return [];
+  }
+  return data ?? [];
+}
+
 // ── Sistema de chat con loop de tool use ──────────────────────────────────────
 
-const SYSTEM_PROMPT = `Sos el Asistente IA del CRM de Turdo Group, una inmobiliaria de Mar del Plata.
+const SYSTEM_PROMPT_BASE = `Sos el Asistente IA del CRM de Turdo Group, una inmobiliaria de Mar del Plata.
 Tu interlocutora principal es Leticia Turdo (admin/dueña). Hablás siempre en **español argentino** (vos, tuteo, modismos naturales).
 
 Tu rol:
@@ -302,7 +369,13 @@ Sobre el modelo del negocio:
 
 IMPORTANTE: el CRM está en fase de desarrollo. Muchas métricas todavía van a estar vacías o con datos limitados. Si una tool devuelve poco/nada, aclaralo: "todavía no hay X cargado, esto se va a poblar a medida que el equipo use el sistema".
 
-Si Leti pregunta algo que no podés responder con tus tools, decile claramente que no tenés esa info y sugerí qué tool similar podría servir.`;
+Si el usuario pregunta algo que no podés responder con tus tools, decile claramente que no tenés esa info y sugerí qué tool similar podría servir.
+
+MEMORIA PERSISTENTE — usá las tools 'recordar' y 'olvidar' proactivamente:
+- Cuando el usuario te diga una preferencia o regla aplicable a futuras conversaciones (ej: "siempre quiero ver los montos en pesos también", "Gian se especializa en zona norte", "no me muestres más a Andrea que está de licencia"), GUARDALO con 'recordar'. NO esperes que te lo pida.
+- Cuando el usuario diga "olvidate de X" o "ya no aplica", usá 'olvidar' con el id correspondiente.
+- NO guardes datos volátiles (conteos del día, métricas que cambian). Solo cosas que sirven a futuro.
+- Después de guardar, mencionalo brevemente: "✓ Lo guardé en memoria".`;
 
 interface ChatMessage {
   role: 'user' | 'assistant';
@@ -316,7 +389,7 @@ interface ClaudeResponse {
   usage?: { input_tokens: number; output_tokens: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number };
 }
 
-async function callClaude(messages: ChatMessage[]): Promise<ClaudeResponse> {
+async function callClaude(messages: ChatMessage[], systemPrompt: string): Promise<ClaudeResponse> {
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -329,7 +402,7 @@ async function callClaude(messages: ChatMessage[]): Promise<ClaudeResponse> {
       max_tokens: 1500,
       system: [
         // Cache prompt sistema + tools (no cambian, ahorra mucho)
-        { type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } },
+        { type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } },
       ],
       tools: TOOLS.map(t => ({ ...t, cache_control: undefined })),
       messages,
@@ -347,12 +420,23 @@ Deno.serve(async (req: Request) => {
   if (req.method !== 'POST') return new Response('Method not allowed', { status: 405, headers: CORS_HEADERS });
 
   try {
-    const body = await req.json() as { history?: ChatMessage[]; question: string; role?: string };
+    const body = await req.json() as { history?: ChatMessage[]; question: string; role?: string; user_email?: string };
     if (!body.question?.trim()) {
       return new Response(JSON.stringify({ error: 'Falta la pregunta' }), { status: 400, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' } });
     }
     if (body.role !== 'admin') {
       return new Response(JSON.stringify({ error: 'Solo admin tiene acceso al asistente por ahora' }), { status: 403, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' } });
+    }
+    _currentUserEmail = body.user_email ?? 'leticia@turdogroup.com';
+
+    // Cargar memorias persistentes y armar prompt
+    const memories = await loadMemories(_currentUserEmail);
+    let systemPrompt = SYSTEM_PROMPT_BASE;
+    if (memories.length > 0) {
+      const memText = memories
+        .map(m => `[id:${m.id}] (${m.category}, importancia ${m.importance}/5): ${m.content}`)
+        .join('\n');
+      systemPrompt += `\n\n=== MEMORIAS GUARDADAS DE CONVERSACIONES PREVIAS ===\n${memText}\n=== FIN MEMORIAS ===\nUsalas como contexto al responder. Si el usuario contradice alguna, actualizala con 'recordar' o borrala con 'olvidar'.`;
     }
 
     const history = body.history ?? [];
@@ -366,7 +450,7 @@ Deno.serve(async (req: Request) => {
     // Loop de tool use: hasta 6 iteraciones para no quedar infinito
     let response: ClaudeResponse | null = null;
     for (let i = 0; i < 6; i++) {
-      response = await callClaude(messages);
+      response = await callClaude(messages, systemPrompt);
       usage.input += response.usage?.input_tokens ?? 0;
       usage.output += response.usage?.output_tokens ?? 0;
       usage.cache_read += response.usage?.cache_read_input_tokens ?? 0;
@@ -409,6 +493,7 @@ Deno.serve(async (req: Request) => {
     return new Response(JSON.stringify({
       answer: finalText,
       usage,
+      memories_loaded: memories.length,
     }), { headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' } });
 
   } catch (e) {
