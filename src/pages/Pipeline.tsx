@@ -201,7 +201,7 @@ const LeadCard = ({
       } ${isUpdating ? 'opacity-50 pointer-events-none' : ''}`}
     >
       <div className="flex items-start gap-2">
-        <div className="flex-shrink-0 mt-0.5"><ChannelIcon channel={lead.channel} size={14} /></div>
+        <div className="flex-shrink-0 mt-0.5"><ChannelIcon channel={lead.channel} size="sm" /></div>
         <div className="flex-1 min-w-0">
           <div className="text-sm font-medium text-[#0F172A] truncate">{lead.name ?? 'Sin nombre'}</div>
           {lead.propertyTitle && (

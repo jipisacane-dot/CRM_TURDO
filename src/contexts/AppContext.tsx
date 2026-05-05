@@ -34,7 +34,7 @@ const toLead = (c: DBContact & { current_stage_key?: string; stage_changed_at?: 
   messages: toMessages(messages, c.channel),
   notes: c.notes ?? undefined,
   current_stage_key: c.current_stage_key ?? 'nuevo',
-  stage_changed_at: c.stage_changed_at,
+  stage_changed_at: c.stage_changed_at ?? undefined,
 });
 
 // ── Context ───────────────────────────────────────────────────────────────────
