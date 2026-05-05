@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useApp } from '../contexts/AppContext';
 import { Modal } from '../components/ui/Modal';
+import { tokko } from '../services/tokko';
 import {
   agentsApi,
   operationsApi,
@@ -94,6 +95,7 @@ export default function Operations() {
   const [createdOpDocs, setCreatedOpDocs] = useState<DBDocument[]>([]);
   const [draft, setDraft] = useState<NewOpDraft>(blankDraft());
   const [saving, setSaving] = useState(false);
+  const [tokkoLookup, setTokkoLookup] = useState<{ status: 'idle' | 'searching' | 'found' | 'notfound'; cover?: string | null }>({ status: 'idle' });
   const [statusTab, setStatusTab] = useState<OperationStatus | 'all'>('all');
   const [filterAgent, setFilterAgent] = useState<string>('all');
   const [detailOp, setDetailOp] = useState<OperationWithRefs | null>(null);
@@ -137,6 +139,41 @@ export default function Operations() {
 
   const sellableAgents = useMemo(() => agents.filter(a => a.role === 'agent' && a.active), [agents]);
   const myAgentId = useMemo(() => agents.find(a => a.email === currentUser.email)?.id ?? null, [agents, currentUser.email]);
+
+  // Auto-completar desde Tokko cuando vendedor tipea código de propiedad
+  useEffect(() => {
+    if (!modalOpen || modalStep !== 'form' || draft.property_id) {
+      setTokkoLookup({ status: 'idle' });
+      return;
+    }
+    const code = draft.newPropCode.trim();
+    if (code.length < 3) {
+      setTokkoLookup({ status: 'idle' });
+      return;
+    }
+    setTokkoLookup({ status: 'searching' });
+    const t = setTimeout(async () => {
+      try {
+        const found = await tokko.findByCode(code);
+        if (!found) {
+          setTokkoLookup({ status: 'notfound' });
+          return;
+        }
+        // Autocompletar campos vacíos (no pisar lo que el vendedor ya tipeó manual)
+        setDraft(prev => ({
+          ...prev,
+          newPropAddress: prev.newPropAddress || found.address,
+          newPropBarrio: prev.newPropBarrio || found.location || '',
+          newPropPrice: prev.newPropPrice || (found.mainPrice ? String(found.mainPrice) : ''),
+          precio_venta_usd: prev.precio_venta_usd || (found.mainPrice ? String(found.mainPrice) : ''),
+        }));
+        setTokkoLookup({ status: 'found', cover: found.coverPhoto });
+      } catch {
+        setTokkoLookup({ status: 'notfound' });
+      }
+    }, 400);
+    return () => clearTimeout(t);
+  }, [draft.newPropCode, modalOpen, modalStep, draft.property_id]);
 
   const filtered = useMemo(() => {
     return ops.filter(o => {
@@ -205,6 +242,10 @@ export default function Operations() {
           setSaving(false);
           return;
         }
+        // Si encontramos la propiedad en Tokko y el vendedor no subió otra foto, usamos la de Tokko
+        const tokkoCoverUrl = (tokkoLookup.status === 'found' && tokkoLookup.cover && !draft.newPropCoverFile)
+          ? tokkoLookup.cover : null;
+
         const newProp = await propertiesApi.create({
           address: draft.newPropAddress,
           description: null,
@@ -217,11 +258,11 @@ export default function Operations() {
           tokko_sku: draft.newPropCode || null,
           notes: null,
           barrio: draft.newPropBarrio || null,
-          cover_photo_url: null,
+          cover_photo_url: tokkoCoverUrl,
         });
         propertyId = newProp.id;
 
-        // Subir foto de portada si la cargó
+        // Subir foto de portada si la cargó (sobreescribe la de Tokko si la hay)
         if (draft.newPropCoverFile) {
           try {
             await propertiesApi.uploadCoverPhoto(propertyId, draft.newPropCoverFile);
@@ -630,7 +671,18 @@ export default function Operations() {
 
           {!draft.property_id && (
             <div className="bg-bg-hover rounded-xl p-4 space-y-3 border border-border">
-              <div className="text-xs text-muted uppercase tracking-wider font-medium">Nueva propiedad</div>
+              <div className="flex items-center justify-between">
+                <div className="text-xs text-muted uppercase tracking-wider font-medium">Nueva propiedad</div>
+                {tokkoLookup.status === 'searching' && (
+                  <div className="text-xs text-muted">Buscando en Tokko…</div>
+                )}
+                {tokkoLookup.status === 'found' && (
+                  <div className="text-xs text-emerald-700 font-medium">✓ Encontrada en Tokko</div>
+                )}
+                {tokkoLookup.status === 'notfound' && draft.newPropCode.length >= 3 && (
+                  <div className="text-xs text-amber-700">No la encontramos en Tokko · cargá manual</div>
+                )}
+              </div>
               <div className="grid grid-cols-3 gap-3">
                 <div>
                   <label className="text-xs text-muted mb-1 block">Código *</label>
@@ -674,11 +726,20 @@ export default function Operations() {
               </div>
               <div>
                 <label className="text-xs text-muted mb-1 block">Foto de portada</label>
+                {tokkoLookup.status === 'found' && tokkoLookup.cover && !draft.newPropCoverFile ? (
+                  <div className="flex items-center gap-3 bg-white border border-border rounded-xl p-2">
+                    <img src={tokkoLookup.cover} alt="Portada Tokko" className="w-20 h-14 rounded-md object-cover" />
+                    <div className="flex-1 min-w-0">
+                      <div className="text-xs text-emerald-700 font-medium">Foto traída de Tokko</div>
+                      <div className="text-[10px] text-muted">Si querés reemplazarla, subí otra acá abajo.</div>
+                    </div>
+                  </div>
+                ) : null}
                 <input
                   type="file"
                   accept="image/*"
                   onChange={(e) => setDraft({ ...draft, newPropCoverFile: e.target.files?.[0] ?? null })}
-                  className="w-full text-xs text-muted file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-medium file:bg-crimson file:text-white hover:file:bg-crimson-bright cursor-pointer"
+                  className="w-full text-xs text-muted file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-medium file:bg-crimson file:text-white hover:file:bg-crimson-bright cursor-pointer mt-2"
                 />
                 {draft.newPropCoverFile && (
                   <div className="text-[10px] text-muted mt-1">{draft.newPropCoverFile.name} ({Math.round(draft.newPropCoverFile.size / 1024)} KB)</div>

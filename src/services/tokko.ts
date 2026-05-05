@@ -302,6 +302,14 @@ export const tokko = {
     }
   },
 
+  /** Buscar propiedad por código de referencia (case-insensitive). Usa la cache cargada. */
+  async findByCode(code: string): Promise<CRMProperty | null> {
+    const c = code.trim().toLowerCase();
+    if (!c) return null;
+    const props = await tokko.getProperties();
+    return props.find(p => p.referenceCode?.toLowerCase() === c) ?? null;
+  },
+
   /** Post a lead/contact inquiry to a property */
   async postLead(opts: {
     propertyId: number;
