@@ -258,6 +258,12 @@ Deno.serve(async (req) => {
   if (!ok) method = 'failed';
   console.log(`send-message channel=${contact.channel} method=${method} ok=${ok} err=${errDetail.slice(0, 200)}`);
 
+  // Auto-clasificación de etapa del pipeline (fire-and-forget) — el mensaje del vendedor
+  // también puede mover etapa: "te recibo el sábado" → visita_programada, etc.
+  supabase.functions.invoke('classify-message-stage', {
+    body: { contact_id, message_id: msg.id },
+  }).catch(console.error);
+
   return new Response(JSON.stringify({
     ok: true,
     message: msg,

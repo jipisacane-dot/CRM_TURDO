@@ -90,6 +90,11 @@ Deno.serve(async (req) => {
         supabase.functions.invoke('send-push', {
           body: { title: name, body: text.slice(0, 100), contact_id: contactId, url: '/inbox', agent_id: fullContact?.assigned_to ?? undefined },
         }).catch(console.error);
+
+        // Auto-clasificación de etapa del pipeline (fire-and-forget)
+        supabase.functions.invoke('classify-message-stage', {
+          body: { contact_id: contactId },
+        }).catch(console.error);
       }
     }
   }

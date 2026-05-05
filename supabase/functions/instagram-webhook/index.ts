@@ -95,6 +95,11 @@ Deno.serve(async (req) => {
           agent_id: (contact as Record<string, unknown>).assigned_to ?? undefined,
         },
       }).catch(console.error);
+
+      // Auto-clasificación de etapa del pipeline (fire-and-forget)
+      supabase.functions.invoke('classify-message-stage', {
+        body: { contact_id: contact.id },
+      }).catch(console.error);
     }
   }
 
