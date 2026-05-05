@@ -41,12 +41,10 @@ const todayISO = () => new Date().toISOString().slice(0, 10);
 
 interface NewOpDraft {
   property_id: string;
+  newPropCode: string;
   newPropAddress: string;
-  newPropRooms: string;
   newPropPrice: string;
-  newPropSurface: string;
   newPropBarrio: string;
-  newPropDescription: string;
   newPropCoverFile: File | null;
   vendedor_id: string;
   captador_id: string;
@@ -62,12 +60,10 @@ interface NewOpDraft {
 
 const blankDraft = (): NewOpDraft => ({
   property_id: '',
+  newPropCode: '',
   newPropAddress: '',
-  newPropRooms: '',
   newPropPrice: '',
-  newPropSurface: '',
   newPropBarrio: '',
-  newPropDescription: '',
   newPropCoverFile: null,
   vendedor_id: '',
   captador_id: '',
@@ -211,14 +207,14 @@ export default function Operations() {
         }
         const newProp = await propertiesApi.create({
           address: draft.newPropAddress,
-          description: draft.newPropDescription || null,
-          rooms: draft.newPropRooms ? Number(draft.newPropRooms) : null,
-          surface_m2: draft.newPropSurface ? Number(draft.newPropSurface) : null,
+          description: null,
+          rooms: null,
+          surface_m2: null,
           list_price_usd: draft.newPropPrice ? Number(draft.newPropPrice) : null,
           status: draft.status === 'reservada' ? 'reservada' : 'disponible',
           captador_id: draft.captador_id || null,
           fecha_consignacion: todayISO(),
-          tokko_sku: null,
+          tokko_sku: draft.newPropCode || null,
           notes: null,
           barrio: draft.newPropBarrio || null,
           cover_photo_url: null,
@@ -635,34 +631,34 @@ export default function Operations() {
           {!draft.property_id && (
             <div className="bg-bg-hover rounded-xl p-4 space-y-3 border border-border">
               <div className="text-xs text-muted uppercase tracking-wider font-medium">Nueva propiedad</div>
-              <div>
-                <label className="text-xs text-muted mb-1 block">Dirección *</label>
-                <input
-                  value={draft.newPropAddress}
-                  onChange={(e) => setDraft({ ...draft, newPropAddress: e.target.value })}
-                  className="w-full bg-white border border-border rounded-xl px-3 py-2 text-sm text-[#0F172A]"
-                  placeholder="Ej: Brown 1645, 3° A"
-                />
-              </div>
               <div className="grid grid-cols-3 gap-3">
                 <div>
-                  <label className="text-xs text-muted mb-1 block">Ambientes</label>
+                  <label className="text-xs text-muted mb-1 block">Código *</label>
                   <input
-                    type="number"
-                    value={draft.newPropRooms}
-                    onChange={(e) => setDraft({ ...draft, newPropRooms: e.target.value })}
+                    value={draft.newPropCode}
+                    onChange={(e) => setDraft({ ...draft, newPropCode: e.target.value })}
                     className="w-full bg-white border border-border rounded-xl px-3 py-2 text-sm text-[#0F172A]"
-                    placeholder="3"
+                    placeholder="Ej: TUR-1234"
                   />
                 </div>
-                <div>
-                  <label className="text-xs text-muted mb-1 block">Superficie m²</label>
+                <div className="col-span-2">
+                  <label className="text-xs text-muted mb-1 block">Ubicación exacta *</label>
                   <input
-                    type="number"
-                    value={draft.newPropSurface}
-                    onChange={(e) => setDraft({ ...draft, newPropSurface: e.target.value })}
+                    value={draft.newPropAddress}
+                    onChange={(e) => setDraft({ ...draft, newPropAddress: e.target.value })}
                     className="w-full bg-white border border-border rounded-xl px-3 py-2 text-sm text-[#0F172A]"
-                    placeholder="65"
+                    placeholder="Ej: Brown 1645, 3° A — MdP"
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-muted mb-1 block">Barrio / Zona</label>
+                  <input
+                    value={draft.newPropBarrio}
+                    onChange={(e) => setDraft({ ...draft, newPropBarrio: e.target.value })}
+                    className="w-full bg-white border border-border rounded-xl px-3 py-2 text-sm text-[#0F172A]"
+                    placeholder="Centro · Plaza Mitre · etc."
                   />
                 </div>
                 <div>
@@ -677,31 +673,12 @@ export default function Operations() {
                 </div>
               </div>
               <div>
-                <label className="text-xs text-muted mb-1 block">Barrio / Zona</label>
-                <input
-                  value={draft.newPropBarrio}
-                  onChange={(e) => setDraft({ ...draft, newPropBarrio: e.target.value })}
-                  className="w-full bg-white border border-border rounded-xl px-3 py-2 text-sm text-[#0F172A]"
-                  placeholder="Centro · Plaza Mitre · Norte · etc."
-                />
-              </div>
-              <div>
-                <label className="text-xs text-muted mb-1 block">Descripción</label>
-                <textarea
-                  value={draft.newPropDescription}
-                  onChange={(e) => setDraft({ ...draft, newPropDescription: e.target.value })}
-                  className="w-full bg-white border border-border rounded-xl px-3 py-2 text-sm text-[#0F172A]"
-                  rows={2}
-                  placeholder="Estado, comodidades, particularidades, datos catastrales..."
-                />
-              </div>
-              <div>
                 <label className="text-xs text-muted mb-1 block">Foto de portada</label>
                 <input
                   type="file"
                   accept="image/*"
                   onChange={(e) => setDraft({ ...draft, newPropCoverFile: e.target.files?.[0] ?? null })}
-                  className="w-full text-xs text-muted file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-medium file:bg-crimson file:text-white hover:file:bg-crimson-bright"
+                  className="w-full text-xs text-muted file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-medium file:bg-crimson file:text-white hover:file:bg-crimson-bright cursor-pointer"
                 />
                 {draft.newPropCoverFile && (
                   <div className="text-[10px] text-muted mt-1">{draft.newPropCoverFile.name} ({Math.round(draft.newPropCoverFile.size / 1024)} KB)</div>
