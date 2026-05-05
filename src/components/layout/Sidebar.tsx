@@ -58,6 +58,7 @@ const NAV: NavItem[] = [
   { to: '/notifications',   iconKey: 'alarm',       label: 'Notificaciones', adminOnly: true },
   { to: '/templates',       iconKey: 'inbox',       label: 'Plantillas'  },
   { to: '/auto-assign',     iconKey: 'team',        label: 'Auto-asignación', adminOnly: true },
+  { to: '/audit',           iconKey: 'finanzas',    label: 'Audit log', adminOnly: true },
 ];
 
 const TurdoLogo = ({ compact = false }) => (
