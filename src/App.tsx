@@ -28,9 +28,17 @@ const MyCommissions = lazy(() => import('./pages/MyCommissions'));
 const Finanzas = lazy(() => import('./pages/Finanzas'));
 const Vencimientos = lazy(() => import('./pages/Vencimientos'));
 
+// Skeleton de loading que matchea el layout general (no flash blanco)
 const PageLoader = () => (
-  <div className="flex items-center justify-center h-[60vh]">
-    <div className="text-muted text-sm animate-pulse">Cargando…</div>
+  <div className="p-4 md:p-6 space-y-4 max-w-5xl">
+    <div className="skeleton h-8 w-48" />
+    <div className="skeleton h-4 w-64" />
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-4">
+      <div className="skeleton h-24" />
+      <div className="skeleton h-24" />
+      <div className="skeleton h-24" />
+    </div>
+    <div className="skeleton h-64 mt-4" />
   </div>
 );
 

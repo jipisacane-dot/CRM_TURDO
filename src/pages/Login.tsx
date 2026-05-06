@@ -50,7 +50,7 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen bg-bg-main flex items-center justify-center p-4">
+    <div className="min-h-[100dvh] bg-bg-main flex items-center justify-center p-4 safe-top safe-bottom">
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
         <div className="absolute -top-40 -right-40 w-96 h-96 bg-crimson/10 rounded-full blur-3xl" />
         <div className="absolute -bottom-40 -left-40 w-96 h-96 bg-crimson/5 rounded-full blur-3xl" />
@@ -67,9 +67,15 @@ export default function Login() {
                 type="email"
                 value={email}
                 onChange={e => setEmail(e.target.value)}
-                className="w-full bg-bg-input border border-border rounded-xl px-4 py-3 text-[#0F172A] text-sm outline-none focus:border-crimson transition-colors"
+                className="w-full bg-bg-input border border-border rounded-xl px-4 py-3 text-[#0F172A] text-base outline-none focus:border-crimson transition-colors"
                 placeholder="usuario@turdogroup.com"
                 autoFocus
+                autoComplete="username email"
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck={false}
+                inputMode="email"
+                enterKeyHint="next"
               />
             </div>
             <div>
@@ -78,8 +84,10 @@ export default function Login() {
                 type="password"
                 value={password}
                 onChange={e => setPassword(e.target.value)}
-                className="w-full bg-bg-input border border-border rounded-xl px-4 py-3 text-[#0F172A] text-sm outline-none focus:border-crimson transition-colors"
+                className="w-full bg-bg-input border border-border rounded-xl px-4 py-3 text-[#0F172A] text-base outline-none focus:border-crimson transition-colors"
                 placeholder="••••••••"
+                autoComplete="current-password"
+                enterKeyHint="go"
               />
             </div>
 

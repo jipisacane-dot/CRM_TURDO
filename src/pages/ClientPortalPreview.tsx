@@ -49,7 +49,7 @@ export default function ClientPortalPreview() {
   const [pickedSlot, setPickedSlot] = useState<string | null>(null);
 
   return (
-    <div className="min-h-screen bg-white text-[#0F172A]">
+    <div className="min-h-[100dvh] bg-white text-[#0F172A]">
       {/* Mockup banner */}
       <div className="bg-amber-100 text-amber-900 text-center text-xs py-1.5 px-3 border-b border-amber-200">
         🎨 PREVIEW · Así se vería el portal del cliente. Datos de ejemplo del depto Brown 2500.

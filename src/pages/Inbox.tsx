@@ -119,7 +119,10 @@ export default function Inbox() {
   const assignedAgent = selected?.assignedTo ? AGENTS.find(a => a.id === selected.assignedTo) : null;
 
   return (
-    <div className="flex h-[calc(100dvh-5rem)] md:h-screen overflow-hidden" style={{ background: '#F8F9FB' }}>
+    <div
+      className="flex h-[calc(100dvh-5rem-env(safe-area-inset-bottom))] md:h-screen overflow-hidden"
+      style={{ background: '#F8F9FB' }}
+    >
       {/* Conversation list */}
       <div className={`flex flex-col w-full md:w-80 lg:w-96 border-r border-border bg-bg-card flex-shrink-0 ${selectedId ? 'hidden md:flex' : 'flex'}`}>
         {/* Due reminders banner */}

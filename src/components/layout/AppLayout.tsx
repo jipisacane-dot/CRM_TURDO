@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { Sidebar, MobileNav } from './Sidebar';
 import GlobalSearch from '../GlobalSearch';
 
@@ -15,6 +15,7 @@ export const checkSession = () => {
 
 export const AppLayout = ({ children }: { children: ReactNode }) => {
   const navigate = useNavigate();
+  const location = useLocation();
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
@@ -25,12 +26,22 @@ export const AppLayout = ({ children }: { children: ReactNode }) => {
     }
   }, [navigate]);
 
-  if (!ready) return null;
+  // Skeleton placeholder mientras valida sesión (evita flash blanco)
+  if (!ready) {
+    return (
+      <div className="min-h-[100dvh] bg-bg-main flex items-center justify-center">
+        <div className="w-12 h-12 border-3 border-crimson border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-[100dvh] bg-bg-main">
       <Sidebar />
-      <main className="flex-1 min-w-0 pb-[calc(5rem+env(safe-area-inset-bottom))] md:pb-0 overflow-y-auto">
+      <main
+        key={location.pathname}
+        className="flex-1 min-w-0 pb-[calc(5rem+env(safe-area-inset-bottom))] md:pb-0 overflow-y-auto page-fade-enter"
+      >
         {children}
       </main>
       <MobileNav />

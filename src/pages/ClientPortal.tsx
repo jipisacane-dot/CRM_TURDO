@@ -103,12 +103,12 @@ export default function ClientPortal() {
   }, [property]);
 
   if (loading) {
-    return <div className="min-h-screen flex items-center justify-center text-slate-500">Cargando…</div>;
+    return <div className="min-h-[100dvh] flex items-center justify-center text-slate-500">Cargando…</div>;
   }
 
   if (error || !data) {
     return (
-      <div className="min-h-screen flex items-center justify-center p-4">
+      <div className="min-h-[100dvh] flex items-center justify-center p-4">
         <div className="text-center">
           <div className="text-5xl mb-3">😕</div>
           <h1 className="text-xl font-semibold text-slate-900">Este link no está disponible</h1>
@@ -128,7 +128,7 @@ export default function ClientPortal() {
   const whatsappUrl = `https://api.whatsapp.com/send?phone=${agentPhoneDigits}&text=Hola%20${encodeURIComponent(agentFirstName)}!%20Vi%20el%20link%20que%20me%20mandaste.`;
 
   return (
-    <div className="min-h-screen bg-white text-[#0F172A]">
+    <div className="min-h-[100dvh] bg-white text-[#0F172A]">
       <header className="bg-[#8B1F1F] text-white">
         <div className="max-w-2xl mx-auto px-4 py-4 flex items-center justify-between">
           <div>

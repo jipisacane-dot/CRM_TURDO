@@ -191,7 +191,10 @@ export const MobileNav = () => {
   );
   const MOBILE_NAV = visible.slice(0, 5);
   return (
-    <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white border-t border-border safe-bottom">
+    <nav
+      className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-xl border-t border-border"
+      style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
+    >
       <div className="flex">
         {MOBILE_NAV.map(({ to, iconKey, label }) => (
           <NavLink
@@ -199,19 +202,23 @@ export const MobileNav = () => {
             to={to}
             end={to === '/'}
             className={({ isActive }) =>
-              `flex-1 flex flex-col items-center gap-0.5 py-2.5 text-[10px] font-medium transition-all relative ${
-                isActive ? 'text-crimson' : 'text-muted'
+              `flex-1 flex flex-col items-center gap-0.5 py-2.5 text-[10px] font-medium transition-colors relative select-none ${
+                isActive ? 'text-crimson' : 'text-muted active:text-[#0F172A]'
               }`
             }
           >
             {({ isActive }) => (
               <>
-                <span className={isActive ? 'text-crimson' : 'text-muted'}>
-                  <Icon d={ICONS[iconKey]} size={18} />
+                {/* Indicador activo: línea superior estilo iOS */}
+                {isActive && (
+                  <span className="absolute top-0 left-1/2 -translate-x-1/2 w-8 h-0.5 bg-crimson rounded-b-full" />
+                )}
+                <span className={`transition-transform ${isActive ? 'scale-110 text-crimson' : 'text-muted'}`}>
+                  <Icon d={ICONS[iconKey]} size={20} />
                 </span>
-                <span>{label}</span>
+                <span className="leading-tight">{label}</span>
                 {label === 'Bandeja' && (unreadCount > 0 || dueReminders.length > 0) && (
-                  <span className="absolute top-1.5 right-1/4 bg-crimson-bright text-white text-[9px] font-bold rounded-full min-w-[14px] h-3.5 flex items-center justify-center px-1">
+                  <span className="absolute top-1 right-1/4 bg-crimson-bright text-white text-[9px] font-bold rounded-full min-w-[16px] h-4 flex items-center justify-center px-1">
                     {unreadCount + dueReminders.length}
                   </span>
                 )}
