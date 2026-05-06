@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useApp } from '../contexts/AppContext';
 import { templatesApi, type MessageTemplate } from '../services/templates';
+import PageHeader from '../components/ui/PageHeader';
+import EmptyState from '../components/ui/EmptyState';
 
 const CATEGORIES = ['apertura', 'visita', 'calificacion', 'objeciones', 'seguimiento', 'cierre', 'captacion', 'general'];
 
@@ -64,22 +66,15 @@ export default function Templates() {
 
   return (
     <div className="p-4 md:p-6 max-w-4xl space-y-4">
-      <div className="flex items-center justify-between flex-wrap gap-2">
-        <div>
-          <h1 className="text-2xl font-bold text-[#0F172A]">Plantillas de mensajes</h1>
-          <p className="text-muted text-sm mt-0.5">
-            Respuestas rápidas con variables: <code className="bg-bg-soft px-1 rounded text-[10px]">{'{nombre}'}</code>{' '}
-            <code className="bg-bg-soft px-1 rounded text-[10px]">{'{propiedad}'}</code>{' '}
-            <code className="bg-bg-soft px-1 rounded text-[10px]">{'{agente}'}</code>{' '}
-            <code className="bg-bg-soft px-1 rounded text-[10px]">{'{telefono}'}</code>{' '}
-            <code className="bg-bg-soft px-1 rounded text-[10px]">{'{email}'}</code>{' '}
-            <code className="bg-bg-soft px-1 rounded text-[10px]">{'{sucursal}'}</code>
-          </p>
-        </div>
-        <button onClick={startCreate} className="bg-crimson hover:bg-crimson-light text-white px-4 py-2 rounded-xl text-sm font-medium">
-          + Nueva plantilla
-        </button>
-      </div>
+      <PageHeader
+        title="Plantillas de mensajes"
+        subtitle="Respuestas rápidas con variables. Usá {nombre}, {propiedad}, {agente}, {sucursal}, {telefono}, {email} dentro del texto y se reemplazan automáticamente."
+        actions={
+          <button onClick={startCreate} className="bg-crimson hover:bg-crimson-light text-white px-4 py-2 rounded-xl text-sm font-medium">
+            + Nueva plantilla
+          </button>
+        }
+      />
 
       {loading ? (
         <div className="text-muted text-sm">Cargando…</div>
@@ -110,9 +105,16 @@ export default function Templates() {
             </div>
           ))}
           {templates.length === 0 && (
-            <div className="text-center py-12 text-muted text-sm">
-              No hay plantillas todavía. Tocá "+ Nueva" para crear la primera.
-            </div>
+            <EmptyState
+              icon="📋"
+              title="No hay plantillas todavía"
+              description="Las plantillas son respuestas rápidas que el equipo puede insertar con un click en cualquier chat."
+              action={
+                <button onClick={startCreate} className="bg-crimson text-white px-4 py-2 rounded-xl text-sm font-medium">
+                  + Crear la primera
+                </button>
+              }
+            />
           )}
         </div>
       )}

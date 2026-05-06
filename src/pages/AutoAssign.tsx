@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useApp } from '../contexts/AppContext';
 import { assignmentApi, type AssignmentConfig, type AgentLoad } from '../services/assignment';
+import PageHeader from '../components/ui/PageHeader';
 
 const ALL_CHANNELS = ['whatsapp', 'instagram', 'facebook', 'web', 'email', 'zonaprop', 'argenprop'];
 
@@ -57,12 +58,10 @@ export default function AutoAssign() {
 
   return (
     <div className="p-4 md:p-6 space-y-4 max-w-5xl">
-      <div>
-        <h1 className="text-2xl font-bold text-[#0F172A]">Auto-asignación de leads</h1>
-        <p className="text-muted text-sm mt-0.5">
-          Cuando entra un lead nuevo sin vendedor asignado, el sistema lo manda automáticamente al vendedor con menos carga (priorizando coincidencia de sucursal y canal).
-        </p>
-      </div>
+      <PageHeader
+        title="Auto-asignación de leads"
+        subtitle="Cuando entra un lead nuevo sin vendedor asignado, el sistema lo manda automáticamente al vendedor con menos carga (priorizando coincidencia de sucursal y canal)."
+      />
 
       {loading ? (
         <div className="text-muted text-sm">Cargando…</div>

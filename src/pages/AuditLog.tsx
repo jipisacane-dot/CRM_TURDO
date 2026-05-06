@@ -3,6 +3,8 @@ import { useApp } from '../contexts/AppContext';
 import { supabase } from '../services/supabase';
 import { formatDistanceToNow, format } from 'date-fns';
 import { es } from 'date-fns/locale';
+import PageHeader from '../components/ui/PageHeader';
+import EmptyState from '../components/ui/EmptyState';
 
 interface AuditEntry {
   id: string;
@@ -91,12 +93,10 @@ export default function AuditLog() {
 
   return (
     <div className="p-4 md:p-6 space-y-4 max-w-4xl">
-      <div>
-        <h1 className="text-2xl font-bold text-[#0F172A]">Audit log</h1>
-        <p className="text-muted text-sm mt-0.5">
-          Registro inmutable de acciones críticas en el CRM. Quién hizo qué, cuándo. {entries.length} eventos cargados.
-        </p>
-      </div>
+      <PageHeader
+        title="Audit log"
+        subtitle={`Registro inmutable de acciones críticas en el CRM. Quién hizo qué, cuándo. ${entries.length} eventos cargados.`}
+      />
 
       <div className="flex gap-2 flex-wrap">
         {FILTERS.map(f => (
@@ -119,7 +119,11 @@ export default function AuditLog() {
       {loading ? (
         <div className="text-muted text-sm py-12 text-center animate-pulse">Cargando…</div>
       ) : filtered.length === 0 ? (
-        <div className="text-muted text-sm py-12 text-center">Sin eventos para los filtros aplicados.</div>
+        <EmptyState
+          icon="📜"
+          title="Sin eventos"
+          description="No hay registros que matcheen los filtros aplicados. Probá cambiar la categoría o limpiar el buscador."
+        />
       ) : (
         <div className="space-y-1">
           {filtered.map((e, i) => {

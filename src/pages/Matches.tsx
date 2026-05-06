@@ -7,6 +7,8 @@ import { ChannelIcon } from '../components/ui/ChannelIcon';
 import { useNavigate } from 'react-router-dom';
 import { formatDistanceToNow } from 'date-fns';
 import { es } from 'date-fns/locale';
+import PageHeader from '../components/ui/PageHeader';
+import EmptyState from '../components/ui/EmptyState';
 
 interface PropertyGroup {
   property_id: string;
@@ -97,13 +99,11 @@ export default function Matches() {
 
   return (
     <div className="p-4 md:p-6 space-y-4 max-w-5xl">
-      <div>
-        <h1 className="text-2xl font-bold text-[#0F172A]">Matches automáticos</h1>
-        <p className="text-muted text-sm mt-0.5">
-          La IA cruza propiedades disponibles con leads que ya pidieron algo similar (zona, ambientes, presupuesto).
-          {matches.length > 0 && ` ${matches.length} matches pendientes en ${grouped.length} propiedades.`}
-        </p>
-      </div>
+      <PageHeader
+        title="Matches automáticos"
+        subtitle={`La IA cruza propiedades disponibles con leads que ya pidieron algo similar.${matches.length > 0 ? ` ${matches.length} pendientes en ${grouped.length} propiedades.` : ''}`}
+        badge={matches.length > 0 ? <span className="bg-violet-100 text-violet-800 text-xs font-semibold px-2 py-0.5 rounded-full">{matches.length}</span> : undefined}
+      />
 
       <div className="bg-violet-50 border border-violet-200 text-violet-900 rounded-xl p-3 text-sm">
         💡 <strong>Cómo funciona:</strong> cada vez que cargás una propiedad o un lead nos cuenta lo que busca,
@@ -114,7 +114,11 @@ export default function Matches() {
       {loading ? (
         <Skeleton />
       ) : grouped.length === 0 ? (
-        <Empty />
+        <EmptyState
+          icon="🔍"
+          title="No hay matches pendientes"
+          description="Cuando cargues una propiedad nueva o un lead nos diga lo que busca, el sistema cruza automáticamente y aparecen acá."
+        />
       ) : (
         grouped.map(g => (
           <PropertyCard
@@ -225,16 +229,6 @@ const ScoreBadge = ({ score }: { score: number }) => {
 const Skeleton = () => (
   <div className="space-y-3">
     {[0, 1, 2].map(i => <div key={i} className="skeleton h-24" />)}
-  </div>
-);
-
-const Empty = () => (
-  <div className="bg-white border border-dashed border-border rounded-2xl p-8 text-center">
-    <div className="text-5xl mb-2">🔍</div>
-    <h3 className="text-base font-semibold text-[#0F172A]">No hay matches pendientes</h3>
-    <p className="text-sm text-muted mt-1 max-w-md mx-auto">
-      Cuando cargues una propiedad nueva o un lead nos diga lo que busca, el sistema cruza automáticamente y aparecen acá.
-    </p>
   </div>
 );
 

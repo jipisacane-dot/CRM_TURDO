@@ -38,29 +38,67 @@ type NavItem = {
   agentOnly?: boolean;
 };
 
-const NAV: NavItem[] = [
-  { to: '/',                iconKey: 'dashboard',   label: 'Dashboard'   },
-  { to: '/inbox',           iconKey: 'inbox',       label: 'Bandeja'     },
-  { to: '/contacts',        iconKey: 'contacts',    label: 'Contactos'   },
-  { to: '/leads',           iconKey: 'leads',       label: 'Consultas'   },
-  { to: '/pipeline',        iconKey: 'pipeline',    label: 'Pipeline'    },
-  { to: '/properties',      iconKey: 'properties',  label: 'Propiedades' },
-  { to: '/operations',      iconKey: 'operations',  label: 'Operaciones' },
-  { to: '/negotiations',    iconKey: 'handshake',   label: 'Negociaciones' },
-  { to: '/asistente',       iconKey: 'sparkle',     label: 'Asistente IA', adminOnly: true },
-  { to: '/payroll',         iconKey: 'money',       label: 'Liquidación', adminOnly: true },
-  { to: '/finanzas',        iconKey: 'finanzas',    label: 'Finanzas', adminOnly: true },
-  { to: '/vencimientos',    iconKey: 'alarm',       label: 'Vencimientos', adminOnly: true },
-  { to: '/my-commissions',  iconKey: 'wallet',      label: 'Mis comisiones', agentOnly: true },
-  { to: '/team',            iconKey: 'team',        label: 'Equipo'      },
-  { to: '/calendar',        iconKey: 'calendar',    label: 'Calendario'  },
-  { to: '/analytics',       iconKey: 'analytics',   label: 'Analíticas'  },
-  { to: '/notifications',   iconKey: 'alarm',       label: 'Notificaciones', adminOnly: true },
-  { to: '/templates',       iconKey: 'inbox',       label: 'Plantillas'  },
-  { to: '/auto-assign',     iconKey: 'team',        label: 'Auto-asignación', adminOnly: true },
-  { to: '/audit',           iconKey: 'finanzas',    label: 'Audit log', adminOnly: true },
-  { to: '/matches',         iconKey: 'sparkle',     label: 'Matches IA', adminOnly: true },
+interface NavGroup {
+  label: string;
+  items: NavItem[];
+}
+
+const NAV_GROUPS: NavGroup[] = [
+  {
+    label: 'Operativa',
+    items: [
+      { to: '/',             iconKey: 'dashboard',  label: 'Dashboard'    },
+      { to: '/inbox',        iconKey: 'inbox',      label: 'Bandeja'      },
+      { to: '/contacts',     iconKey: 'contacts',   label: 'Contactos'    },
+      { to: '/leads',        iconKey: 'leads',      label: 'Consultas'    },
+      { to: '/pipeline',     iconKey: 'pipeline',   label: 'Pipeline'     },
+      { to: '/calendar',     iconKey: 'calendar',   label: 'Calendario'   },
+    ],
+  },
+  {
+    label: 'Negocio',
+    items: [
+      { to: '/properties',   iconKey: 'properties', label: 'Propiedades'  },
+      { to: '/operations',   iconKey: 'operations', label: 'Operaciones'  },
+      { to: '/negotiations', iconKey: 'handshake',  label: 'Negociaciones' },
+    ],
+  },
+  {
+    label: 'IA & Análisis',
+    items: [
+      { to: '/matches',      iconKey: 'sparkle',    label: 'Matches IA',   adminOnly: true },
+      { to: '/asistente',    iconKey: 'sparkle',    label: 'Asistente IA', adminOnly: true },
+      { to: '/analytics',    iconKey: 'analytics',  label: 'Analíticas'   },
+    ],
+  },
+  {
+    label: 'Equipo',
+    items: [
+      { to: '/team',         iconKey: 'team',       label: 'Vendedores'   },
+      { to: '/templates',    iconKey: 'inbox',      label: 'Plantillas'   },
+      { to: '/my-commissions', iconKey: 'wallet',   label: 'Mis comisiones', agentOnly: true },
+    ],
+  },
+  {
+    label: 'Administración',
+    items: [
+      { to: '/payroll',      iconKey: 'money',      label: 'Liquidación',  adminOnly: true },
+      { to: '/finanzas',     iconKey: 'finanzas',   label: 'Finanzas',     adminOnly: true },
+      { to: '/vencimientos', iconKey: 'alarm',      label: 'Vencimientos', adminOnly: true },
+      { to: '/audit',        iconKey: 'finanzas',   label: 'Audit log',    adminOnly: true },
+    ],
+  },
+  {
+    label: 'Configuración',
+    items: [
+      { to: '/auto-assign',  iconKey: 'team',       label: 'Auto-asignación', adminOnly: true },
+      { to: '/notifications', iconKey: 'alarm',     label: 'Notificaciones',  adminOnly: true },
+    ],
+  },
 ];
+
+// Lista plana para mantener compatibilidad con MobileNav
+const NAV: NavItem[] = NAV_GROUPS.flatMap(g => g.items);
 
 const TurdoLogo = ({ compact = false }) => (
   <div className={`flex items-center gap-3 ${compact ? 'justify-center' : ''}`}>
@@ -83,10 +121,16 @@ const TurdoLogo = ({ compact = false }) => (
 export const Sidebar = () => {
   const { unreadCount, dueReminders, currentUser } = useApp();
   const { status: pushStatus, loading: pushLoading, subscribe, unsubscribe } = usePushNotifications();
-  const visibleNav = NAV.filter(n =>
-    (!n.adminOnly || currentUser.role === 'admin') &&
-    (!n.agentOnly || currentUser.role === 'agent')
-  );
+
+  const visibleGroups = NAV_GROUPS
+    .map(g => ({
+      ...g,
+      items: g.items.filter(n =>
+        (!n.adminOnly || currentUser.role === 'admin') &&
+        (!n.agentOnly || currentUser.role === 'agent')
+      ),
+    }))
+    .filter(g => g.items.length > 0);
 
   const handleLogout = () => {
     localStorage.removeItem('crm_session');
@@ -100,43 +144,52 @@ export const Sidebar = () => {
         <TurdoLogo />
       </div>
 
-      <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto">
-        {visibleNav.map(({ to, iconKey, label }) => (
-          <NavLink
-            key={to}
-            to={to}
-            end={to === '/'}
-            className={({ isActive }) =>
-              `flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
-                isActive
-                  ? 'bg-crimson text-white [&>svg]:stroke-white'
-                  : 'text-[#475569] hover:text-[#0F172A] hover:bg-bg-hover'
-              }`
-            }
-          >
-            {({ isActive }) => (
-              <>
-                <span className={isActive ? 'text-white' : 'text-muted'}>
-                  <Icon d={ICONS[iconKey]} size={15} />
-                </span>
-                <span>{label}</span>
-                {label === 'Bandeja' && (unreadCount > 0 || dueReminders.length > 0) && (
-                  <span className="ml-auto flex items-center gap-1">
-                    {unreadCount > 0 && (
-                      <span className="bg-crimson-bright text-white text-[10px] font-semibold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1">
-                        {unreadCount}
+      <nav className="flex-1 px-3 py-4 space-y-4 overflow-y-auto">
+        {visibleGroups.map((group) => (
+          <div key={group.label}>
+            <div className="px-3 mb-1.5 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
+              {group.label}
+            </div>
+            <div className="space-y-0.5">
+              {group.items.map(({ to, iconKey, label }) => (
+                <NavLink
+                  key={to}
+                  to={to}
+                  end={to === '/'}
+                  className={({ isActive }) =>
+                    `flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
+                      isActive
+                        ? 'bg-crimson text-white [&>svg]:stroke-white'
+                        : 'text-[#475569] hover:text-[#0F172A] hover:bg-bg-hover'
+                    }`
+                  }
+                >
+                  {({ isActive }) => (
+                    <>
+                      <span className={isActive ? 'text-white' : 'text-muted'}>
+                        <Icon d={ICONS[iconKey]} size={15} />
                       </span>
-                    )}
-                    {dueReminders.length > 0 && (
-                      <span className="bg-amber-400 text-white text-[10px] font-semibold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1">
-                        {dueReminders.length}
-                      </span>
-                    )}
-                  </span>
-                )}
-              </>
-            )}
-          </NavLink>
+                      <span>{label}</span>
+                      {label === 'Bandeja' && (unreadCount > 0 || dueReminders.length > 0) && (
+                        <span className="ml-auto flex items-center gap-1">
+                          {unreadCount > 0 && (
+                            <span className="bg-crimson-bright text-white text-[10px] font-semibold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1">
+                              {unreadCount}
+                            </span>
+                          )}
+                          {dueReminders.length > 0 && (
+                            <span className="bg-amber-400 text-white text-[10px] font-semibold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1">
+                              {dueReminders.length}
+                            </span>
+                          )}
+                        </span>
+                      )}
+                    </>
+                  )}
+                </NavLink>
+              ))}
+            </div>
+          </div>
         ))}
       </nav>
 

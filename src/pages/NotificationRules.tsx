@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useApp } from '../contexts/AppContext';
 import { notificationsApi, type NotificationRule, type NotificationRuleUpdate } from '../services/notifications';
+import PageHeader from '../components/ui/PageHeader';
 
 const RULE_HINTS: Record<string, string> = {
   agent_no_reply_15min: 'Cuando el cliente escribe y el vendedor no responde en N minutos.',
@@ -66,22 +67,18 @@ export default function NotificationRulesPage() {
 
   return (
     <div className="p-4 md:p-6 space-y-4 max-w-4xl">
-      <div className="flex items-start justify-between gap-3 flex-wrap">
-        <div>
-          <h1 className="text-2xl font-bold text-[#0F172A]">Reglas de notificaciones</h1>
-          <p className="text-muted text-sm mt-0.5">
-            Configurá cuándo el sistema manda push automáticos al equipo. {enabledCount} de {rules.length} reglas activas.
-          </p>
-        </div>
-        <div className="flex gap-2">
+      <PageHeader
+        title="Reglas de notificaciones"
+        subtitle={`Configurá cuándo el sistema manda push automáticos al equipo. ${enabledCount} de ${rules.length} reglas activas.`}
+        actions={
           <button
             onClick={onDryRun}
             className="px-3 py-2 text-sm bg-white border border-border rounded-xl hover:bg-bg-soft text-[#0F172A]"
           >
             Probar (dry-run)
           </button>
-        </div>
-      </div>
+        }
+      />
 
       <div className="bg-amber-50 border border-amber-200 text-amber-900 rounded-xl p-3 text-sm">
         <strong>Cómo funciona:</strong> el motor corre cada 15 min y procesa todas las reglas activas. Para cada lead que cumple, manda push al asignado (y opcionalmente a la admin). Cooldown automático para no repetir el mismo aviso al mismo lead. Tocá <em>"Probar"</em> arriba para simular sin mandar pushes reales.
