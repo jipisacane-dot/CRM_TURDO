@@ -10,6 +10,7 @@ import TemplatePicker from '../components/TemplatePicker';
 import ReplySuggestions from '../components/ReplySuggestions';
 import ClientPortalButton from '../components/ClientPortalButton';
 import AttachMediaButton from '../components/AttachMediaButton';
+import RecordVoiceButton from '../components/RecordVoiceButton';
 import QualityBadge, { QualityFilter } from '../components/ui/QualityBadge';
 import MessageMedia from '../components/ui/MessageMedia';
 import { pipelineStagesApi, pipelineApi, type PipelineStage } from '../services/pipeline';
@@ -352,6 +353,13 @@ export default function Inbox() {
                 agent={currentUser}
               />
               <AttachMediaButton
+                contactId={selected.id}
+                agentId={currentUser.id}
+                channel={channelLabel(selected.channel)}
+                disabled={sending}
+                onSent={() => { void refreshLeads(); }}
+              />
+              <RecordVoiceButton
                 contactId={selected.id}
                 agentId={currentUser.id}
                 channel={channelLabel(selected.channel)}
