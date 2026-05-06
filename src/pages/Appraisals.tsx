@@ -81,14 +81,20 @@ export default function Appraisals() {
     try {
       const r = await appraisalsApi.create({
         property,
-        client: client.name || client.phone ? client : undefined,
+        client: (client.name || client.phone) ? client : undefined,
         agent_id: currentUser.id,
         agent_email: currentUser.email,
       });
+      if (!r || typeof r.suggested_price_low_usd !== 'number') {
+        throw new Error('La IA no devolvió un resultado válido. Intentá de nuevo.');
+      }
       setResult(r);
       setStep('result');
+      // Scroll al top para que vea el resultado
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (e) {
-      setError((e as Error).message);
+      console.error('Appraisal error:', e);
+      setError(`No se pudo generar la tasación: ${(e as Error).message ?? 'error desconocido'}`);
       setStep('form');
     }
   };
@@ -144,7 +150,7 @@ export default function Appraisals() {
           {/* Sección: ubicación */}
           <Section title="Ubicación">
             <div className="grid md:grid-cols-2 gap-3">
-              <Field label="Dirección *" required>
+              <Field label="Dirección" required>
                 <input
                   value={property.address}
                   onChange={e => setProperty(p => ({ ...p, address: e.target.value }))}
@@ -269,7 +275,12 @@ export default function Appraisals() {
           </Section>
 
           {error && <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl p-3 text-sm">{error}</div>}
+        </div>
+      )}
 
+      {/* Botón sticky de submit (solo en step form) — siempre visible */}
+      {step === 'form' && (
+        <div className="sticky bottom-4 z-10 bg-white border border-border rounded-2xl shadow-lg p-3">
           <button
             onClick={submit}
             disabled={!property.address.trim()}
@@ -277,8 +288,10 @@ export default function Appraisals() {
           >
             ✨ Generar tasación con IA
           </button>
-          <p className="text-xs text-muted text-center">
-            La IA tarda 5-10 segundos. Después podés descargar el PDF profesional listo para enviar.
+          <p className="text-[11px] text-muted text-center mt-1.5">
+            {!property.address.trim()
+              ? 'Cargá al menos la dirección para tasar'
+              : 'La IA tarda 5-10 segundos. Después descargás el PDF profesional.'}
           </p>
         </div>
       )}
