@@ -6,7 +6,7 @@ import { tokko } from '../services/tokko';
 
 // ── Convert Supabase rows → CRM Lead type ─────────────────────────────────────
 
-const toMessages = (rows: DBMessage[], channel: string) =>
+const toMessages = (rows: DBMessage[], channel: string): Lead['messages'] =>
   rows.map(m => ({
     id: m.id,
     direction: m.direction,
@@ -15,6 +15,12 @@ const toMessages = (rows: DBMessage[], channel: string) =>
     channel: channel as Lead['messages'][number]['channel'],
     agentId: m.agent_id ?? undefined,
     read: m.read,
+    media_type: (m.media_type as Lead['messages'][number]['media_type']) ?? null,
+    media_url: m.media_url ?? null,
+    media_caption: m.media_caption ?? null,
+    media_mime: m.media_mime ?? null,
+    media_filename: m.media_filename ?? null,
+    media_size_bytes: m.media_size_bytes ?? null,
   }));
 
 const toLead = (c: DBContact & { current_stage_key?: string | null; stage_changed_at?: string | null; duplicate_of?: string | null; quality_label?: string | null; quality_score?: number | null; quality_reason?: string | null }, messages: DBMessage[]): Lead => ({

@@ -9,7 +9,9 @@ import { ReminderModal } from '../components/ui/ReminderModal';
 import TemplatePicker from '../components/TemplatePicker';
 import ReplySuggestions from '../components/ReplySuggestions';
 import ClientPortalButton from '../components/ClientPortalButton';
+import AttachMediaButton from '../components/AttachMediaButton';
 import QualityBadge, { QualityFilter } from '../components/ui/QualityBadge';
+import MessageMedia from '../components/ui/MessageMedia';
 import { pipelineStagesApi, pipelineApi, type PipelineStage } from '../services/pipeline';
 import type { Channel, Lead } from '../types';
 import { formatDistanceToNow, format } from 'date-fns';
@@ -50,6 +52,7 @@ export default function Inbox() {
   const [sending, setSending] = useState(false);
   const [stages, setStages] = useState<PipelineStage[]>([]);
   const [changingStage, setChangingStage] = useState(false);
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -310,7 +313,11 @@ export default function Inbox() {
                       {AGENTS.find(a => a.id === msg.agentId)?.name.split(' ')[0]} ·
                     </div>
                   )}
-                  <p className="leading-relaxed">{msg.content}</p>
+                  {msg.media_type && msg.media_url ? (
+                    <MessageMedia message={msg} onOpenLightbox={setLightboxUrl} />
+                  ) : (
+                    <p className="leading-relaxed whitespace-pre-wrap">{msg.content}</p>
+                  )}
                   <div className={`text-[10px] mt-1 ${msg.direction === 'out' ? 'text-white/50' : 'text-muted'}`}>
                     {format(new Date(msg.timestamp), 'HH:mm')}
                   </div>
@@ -343,6 +350,13 @@ export default function Inbox() {
               <ClientPortalButton
                 lead={selected}
                 agent={currentUser}
+              />
+              <AttachMediaButton
+                contactId={selected.id}
+                agentId={currentUser.id}
+                channel={channelLabel(selected.channel)}
+                disabled={sending}
+                onSent={() => { void refreshLeads(); }}
               />
               <textarea
                 value={reply}
@@ -403,6 +417,14 @@ export default function Inbox() {
           ))}
         </div>
       </Modal>
+
+      {lightboxUrl && (
+        <div className="fixed inset-0 bg-black z-[60] flex items-center justify-center p-4" onClick={() => setLightboxUrl(null)}>
+          <button onClick={() => setLightboxUrl(null)} className="absolute top-4 right-4 text-white text-2xl z-10">✕</button>
+          <img src={lightboxUrl} alt="" className="max-h-full max-w-full object-contain" onClick={e => e.stopPropagation()} />
+          <a href={lightboxUrl} download target="_blank" rel="noreferrer" className="absolute bottom-4 right-4 bg-white/90 text-black px-3 py-1.5 rounded-lg text-xs hover:bg-white">⬇ Descargar</a>
+        </div>
+      )}
     </div>
   );
 }

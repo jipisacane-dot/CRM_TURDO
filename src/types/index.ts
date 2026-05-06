@@ -32,6 +32,12 @@ export interface Message {
   channel: Channel;
   agentId?: string;
   read: boolean;
+  media_type?: 'image' | 'video' | 'audio' | 'document' | 'sticker' | null;
+  media_url?: string | null;
+  media_caption?: string | null;
+  media_mime?: string | null;
+  media_filename?: string | null;
+  media_size_bytes?: number | null;
 }
 
 export interface Lead {

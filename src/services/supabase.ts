@@ -37,6 +37,12 @@ export interface DBMessage {
   agent_id: string | null;
   read: boolean;
   created_at: string;
+  media_type?: string | null;
+  media_url?: string | null;
+  media_caption?: string | null;
+  media_mime?: string | null;
+  media_filename?: string | null;
+  media_size_bytes?: number | null;
 }
 
 export interface DBReminder {
