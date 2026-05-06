@@ -25,6 +25,7 @@ const ClientPortal = lazy(() => import('./pages/ClientPortal'));
 const AuditLog = lazy(() => import('./pages/AuditLog'));
 const Matches = lazy(() => import('./pages/Matches'));
 const Appraisals = lazy(() => import('./pages/Appraisals'));
+const AppraisalPublic = lazy(() => import('./pages/AppraisalPublic'));
 const Payroll = lazy(() => import('./pages/Payroll'));
 const MyCommissions = lazy(() => import('./pages/MyCommissions'));
 const Finanzas = lazy(() => import('./pages/Finanzas'));
@@ -54,6 +55,7 @@ export default function App() {
               <Route path="/login" element={<Login />} />
               <Route path="/preview/portal" element={<ClientPortalPreview />} />
               <Route path="/c/:token" element={<ClientPortal />} />
+              <Route path="/t/:token" element={<AppraisalPublic />} />
               <Route path="/"            element={<AppLayout><Dashboard /></AppLayout>} />
               <Route path="/inbox"       element={<AppLayout><Inbox /></AppLayout>} />
               <Route path="/contacts"    element={<AppLayout><Contacts /></AppLayout>} />

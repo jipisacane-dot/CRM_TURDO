@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useApp } from '../contexts/AppContext';
 import { appraisalsApi, type PropertyInput, type AppraisalResult } from '../services/appraisals';
 import { generateAppraisalPdf } from '../services/appraisalPdf';
 import PageHeader from '../components/ui/PageHeader';
+import { supabase } from '../services/supabase';
 
 const STATES = [
   { value: 'a_estrenar', label: 'A estrenar' },
@@ -59,8 +60,12 @@ export default function Appraisals() {
     notes: '',
   });
   const [client, setClient] = useState({ name: '', email: '', phone: '' });
+  const [photos, setPhotos] = useState<Array<{ url: string; caption?: string }>>([]);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [result, setResult] = useState<AppraisalResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [linkCopied, setLinkCopied] = useState(false);
+  const photoInputRef = useRef<HTMLInputElement>(null);
 
   const toggleAmenity = (key: string) => {
     setProperty(p => ({
@@ -69,6 +74,35 @@ export default function Appraisals() {
         ? p.amenities.filter(a => a !== key)
         : [...(p.amenities ?? []), key],
     }));
+  };
+
+  const handlePhotoUpload = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    setUploadingPhoto(true);
+    try {
+      const newPhotos: typeof photos = [];
+      for (const file of Array.from(files).slice(0, 6 - photos.length)) {
+        if (!file.type.startsWith('image/')) continue;
+        // Comprimir imagen client-side
+        const compressed = await compressImage(file);
+        const ext = compressed.type.split('/')[1] ?? 'jpg';
+        const path = `appraisals/${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`;
+        const { error: upErr } = await supabase.storage.from('chat-media').upload(path, compressed, {
+          contentType: compressed.type,
+          upsert: false,
+        });
+        if (upErr) { console.error(upErr); continue; }
+        const { data: pub } = supabase.storage.from('chat-media').getPublicUrl(path);
+        newPhotos.push({ url: pub.publicUrl });
+      }
+      setPhotos(prev => [...prev, ...newPhotos]);
+    } finally {
+      setUploadingPhoto(false);
+    }
+  };
+
+  const removePhoto = (idx: number) => {
+    setPhotos(prev => prev.filter((_, i) => i !== idx));
   };
 
   const submit = async () => {
@@ -82,6 +116,7 @@ export default function Appraisals() {
       const r = await appraisalsApi.create({
         property,
         client: (client.name || client.phone) ? client : undefined,
+        photos,
         agent_id: currentUser.id,
         agent_email: currentUser.email,
       });
@@ -269,6 +304,50 @@ export default function Appraisals() {
             />
           </Section>
 
+          <Section title="Fotos del depto (opcional, hasta 6)">
+            <input
+              ref={photoInputRef}
+              type="file"
+              accept="image/*"
+              multiple
+              onChange={e => handlePhotoUpload(e.target.files)}
+              hidden
+            />
+            {photos.length > 0 ? (
+              <div className="grid grid-cols-3 md:grid-cols-6 gap-2 mb-2">
+                {photos.map((p, i) => (
+                  <div key={i} className="relative aspect-square rounded-lg overflow-hidden bg-bg-soft group">
+                    <img src={p.url} alt="" className="w-full h-full object-cover" />
+                    <button
+                      onClick={() => removePhoto(i)}
+                      className="absolute top-1 right-1 bg-black/60 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition-opacity"
+                    >✕</button>
+                  </div>
+                ))}
+                {photos.length < 6 && (
+                  <button
+                    onClick={() => photoInputRef.current?.click()}
+                    disabled={uploadingPhoto}
+                    className="aspect-square rounded-lg border-2 border-dashed border-border hover:border-crimson hover:text-crimson text-muted text-2xl flex items-center justify-center disabled:opacity-50"
+                  >
+                    {uploadingPhoto ? '...' : '+'}
+                  </button>
+                )}
+              </div>
+            ) : (
+              <button
+                onClick={() => photoInputRef.current?.click()}
+                disabled={uploadingPhoto}
+                className="w-full bg-bg-soft hover:bg-bg-input border-2 border-dashed border-border rounded-xl py-6 text-sm text-muted disabled:opacity-50"
+              >
+                {uploadingPhoto ? 'Subiendo…' : '📷 Tocá para subir fotos del depto'}
+              </button>
+            )}
+            <p className="text-[11px] text-muted mt-1.5">
+              Las fotos aparecen en el link compartible para que el cliente las vea junto con la tasación.
+            </p>
+          </Section>
+
           <Section title="Cliente / propietario (opcional)">
             <div className="grid md:grid-cols-3 gap-3">
               <Field label="Nombre">
@@ -382,7 +461,39 @@ export default function Appraisals() {
             </div>
           )}
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-2 sticky bottom-4">
+          {/* Compartir link público */}
+          {result.share_token && (
+            <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4">
+              <h3 className="text-sm font-bold text-emerald-900 mb-1">🔗 Link para mandar al cliente</h3>
+              <p className="text-xs text-emerald-800 mb-3">Tasación profesional con fotos, análisis y datos del asesor. Estilo web responsive.</p>
+              <div className="bg-white border border-emerald-200 rounded-xl p-2 mb-2">
+                <code className="text-xs text-[#0F172A] break-all">{`${window.location.origin}/t/${result.share_token}`}</code>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  onClick={async () => {
+                    const url = `${window.location.origin}/t/${result.share_token}`;
+                    await navigator.clipboard.writeText(url);
+                    setLinkCopied(true);
+                    setTimeout(() => setLinkCopied(false), 1500);
+                  }}
+                  className="bg-white border border-border text-[#0F172A] py-2 rounded-lg text-sm font-medium"
+                >
+                  {linkCopied ? '✓ Copiado' : '📋 Copiar link'}
+                </button>
+                <a
+                  href={`https://api.whatsapp.com/send?text=${encodeURIComponent(`Te paso la tasación profesional de tu propiedad:\n${window.location.origin}/t/${result.share_token}`)}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="bg-emerald-500 hover:bg-emerald-600 text-white py-2 rounded-lg text-sm font-medium text-center"
+                >
+                  💬 Compartir WhatsApp
+                </a>
+              </div>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
             <button onClick={downloadPdf} className="bg-crimson hover:bg-crimson-light text-white py-3 rounded-xl font-semibold text-sm">
               📄 Descargar PDF
             </button>
@@ -423,3 +534,31 @@ const Field = ({ label, required, children }: { label: string; required?: boolea
     {children}
   </label>
 );
+
+// Compresión client-side de imagen (max 1600px lado más largo, JPEG q=0.85)
+async function compressImage(file: File): Promise<File> {
+  if (file.size < 400_000 || file.type === 'image/gif') return file;
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise<HTMLImageElement>((res, rej) => {
+      const i = new Image();
+      i.onload = () => res(i);
+      i.onerror = rej;
+      i.src = url;
+    });
+    const ratio = Math.min(1, 1600 / Math.max(img.width, img.height));
+    const w = Math.round(img.width * ratio);
+    const h = Math.round(img.height * ratio);
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return file;
+    ctx.drawImage(img, 0, 0, w, h);
+    const blob: Blob | null = await new Promise(r => canvas.toBlob(r, 'image/jpeg', 0.85));
+    if (!blob) return file;
+    return new File([blob], file.name.replace(/\.\w+$/, '.jpg'), { type: 'image/jpeg' });
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}

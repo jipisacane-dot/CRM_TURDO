@@ -20,6 +20,7 @@ export interface PropertyInput {
 
 export interface AppraisalResult {
   appraisal_id: string | null;
+  share_token: string;
   suggested_price_low_usd: number;
   suggested_price_high_usd: number;
   comparables: Array<{
@@ -42,6 +43,7 @@ export const appraisalsApi = {
   async create(args: {
     property: PropertyInput;
     client?: { name?: string; email?: string; phone?: string };
+    photos?: Array<{ url: string; caption?: string }>;
     agent_id: string;
     agent_email?: string;
     contact_id?: string;

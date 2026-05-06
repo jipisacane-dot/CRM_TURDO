@@ -57,30 +57,45 @@ AJUSTES DE PRECIO (sumar / restar al USD/m² base)
 ═══════════════════════════════════════════════════════════
 REGLAS DE TASACIÓN — CRÍTICAS
 ═══════════════════════════════════════════════════════════
-1. SIEMPRE empezar por la tabla USD/m² por zona. Multiplicar m² × USD/m² base, después aplicar ajustes.
+1. SIEMPRE empezar por la tabla USD/m² por zona. Multiplicar m² × USD/m² **PUNTO MEDIO del rango**, después aplicar ajustes.
 
-2. Si NO hay comparables Tokko, NO bajes el precio por miedo. Usá la tabla de USD/m² que TIENE valores reales del mercado actual. La tabla es tu ancla — los comparables son confirmación adicional.
+   ⚠ IMPORTANTE: usar el PUNTO MEDIO (no medio-alto). Ej: si la tabla dice USD 1.800-2.300, el base es 2.050. Solo subir al medio-alto si la propiedad tiene CLAROS factores premium (vista al mar verificada, totalmente reciclado a estrenar, piso alto con amenities top, edificio nuevo con prestigio).
 
-3. Si los comparables Tokko vienen MUY por debajo de la tabla, probablemente esos comparables son:
-   - propiedades en peor zona dentro del mismo barrio
-   - estados peores
-   - departamentos viejos/sin reciclar
-   Confiá MÁS en la tabla que en comparables fuera de rango.
+2. Si NO hay comparables Tokko, NO bajes el precio por miedo. Usá la tabla de USD/m². Pero TAMPOCO infles tomando el extremo alto sin razón.
 
-4. Una propiedad bien tasada en Mar del Plata mayo 2026 debería estar al precio MEDIO-ALTO de la tabla, no al MEDIO-BAJO. El mercado subió 12-15% en últimos 12 meses.
+3. Si los comparables Tokko vienen MUY por debajo de la tabla, probablemente esos comparables son de peor zona/estado dentro del barrio. Confiá MÁS en la tabla pero con criterio.
 
-5. El RANGO low-high debe diferir 5-8%, NO 10%+. Diferencias mayores transmiten inseguridad al cliente.
+4. Una propiedad bien tasada en Mar del Plata mayo 2026 está al precio MEDIO de la tabla, no al MEDIO-ALTO ni MEDIO-BAJO. El mercado subió 12-15% en 2025 y eso ya está reflejado en los rangos de la tabla.
 
-6. Estimá días de venta:
-   - Bien tasado dentro de la tabla: 30-60 días
-   - 5% por encima de la tabla: 60-90 días
+5. Penalizaciones por antigüedad — APLICAR ESTRICTAMENTE:
+   - 0-15 años: sin penalización
+   - 16-30 años: -3 a -5%
+   - 31-50 años: -8 a -12%
+   - 51-70 años: **-12 a -18%** (incluso si está reciclado, el techo del precio se ve)
+   - 71+ años: -18 a -25%
+
+6. Penalizaciones por falta de amenities — APLICAR:
+   - **Sin cochera en zona central (Plaza Colón, Plaza Mitre, Centro)**: -5 a -8%. La cochera es CASI ESTÁNDAR en estas zonas — su ausencia es real desventaja, NO neutral.
+   - Sin balcón: -8 a -12%
+   - Sin amenities en edificio nuevo: -3 a -5%
+
+7. El RANGO low-high debe diferir 5-7%, NO 10%+. Diferencias mayores transmiten inseguridad.
+
+8. Estimá días de venta:
+   - Bien tasado en el medio de la tabla: 30-60 días
+   - 5% por encima: 60-90 días
    - 10%+ por encima: 120-180 días
 
-7. NUNCA digas en el razonamiento "no hay comparables suficientes" o "se sugiere validar antes de publicar". Eso desmotiva al cliente y resta credibilidad. Si tenés dudas, expresalas internamente pero presentá un rango decidido.
+9. NUNCA digas "no hay comparables suficientes" o "se sugiere validar antes de publicar". Eso resta credibilidad. Presentá un rango decidido.
 
-8. Razonamiento ESPECÍFICO citando metodología:
-   - "Plaza Mitre tiene un USD/m² de 1.800-2.300 para usado. 70 m² × USD 2.000 = USD 140K. Ajusto -7% por 40 años de antigüedad sin reciclar = USD 130K. Rango USD 128-138K."
-   - NO digas "se aplica un premium conservador" sin números concretos.
+10. Razonamiento con metodología EXPLÍCITA y NÚMEROS CONCRETOS:
+   - "Plaza Mitre USD 1.800-2.300/m² usado. Punto medio: USD 2.050. 70 m² × 2.050 = USD 143.500 base. Ajustes: -10% antigüedad 40 años (no reciclado) = -USD 14.350. +3% balcón al frente = +USD 4.305. Sin cochera en Plaza Mitre = -6% = -USD 8.610. Total: USD 124.845. Rango USD 122-130K."
+   - NO digas "se aplica un premium conservador" sin números.
+
+11. CHECK FINAL antes de devolver el rango:
+   - ¿El precio sugerido divide al m² da un USD/m² que cae dentro de la tabla del barrio? Sí ✓
+   - ¿Las penalizaciones por antigüedad / falta de amenities están aplicadas? Sí ✓
+   - ¿El rango es razonable (5-7% diferencia)? Sí ✓
 
 ═══════════════════════════════════════════════════════════
 OUTPUT ESTRICTO en JSON, sin markdown:
@@ -259,11 +274,19 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { headers: CORS });
   if (req.method !== 'POST') return new Response('Method not allowed', { status: 405, headers: CORS });
 
-  let body: { property?: PropertyInput; agent_id?: string; agent_email?: string; contact_id?: string; client?: { name?: string; email?: string; phone?: string }; save?: boolean };
+  let body: {
+    property?: PropertyInput;
+    agent_id?: string;
+    agent_email?: string;
+    contact_id?: string;
+    client?: { name?: string; email?: string; phone?: string };
+    photos?: Array<{ url: string; caption?: string }>;
+    save?: boolean;
+  };
   try { body = await req.json(); }
   catch { return new Response(JSON.stringify({ error: 'Invalid JSON' }), { status: 400, headers: CORS }); }
 
-  const { property, agent_id, agent_email, contact_id, client, save = true } = body;
+  const { property, agent_id, agent_email, contact_id, client, photos = [], save = true } = body;
   if (!property?.address) {
     return new Response(JSON.stringify({ error: 'property.address required' }), { status: 400, headers: CORS });
   }
@@ -291,12 +314,29 @@ Deno.serve(async (req) => {
     }
   }
 
-  // 4. Guardar appraisal en DB
+  // 4. Generar share_token único
+  const generateToken = () => {
+    const chars = 'abcdefghijkmnpqrstuvwxyz23456789';
+    let t = '';
+    for (let i = 0; i < 10; i++) t += chars[Math.floor(Math.random() * chars.length)];
+    return t;
+  };
+  let shareToken = '';
+  for (let attempt = 0; attempt < 5; attempt++) {
+    shareToken = generateToken();
+    const { data: existing } = await sb.from('appraisals').select('id').eq('share_token', shareToken).maybeSingle();
+    if (!existing) break;
+    shareToken = '';
+  }
+
+  // 5. Guardar appraisal en DB
   let appraisalId: string | null = null;
   if (save && isUuid(resolvedAgentId)) {
     const { data: row, error } = await sb.from('appraisals').insert({
       contact_id: contact_id ?? null,
       agent_id: resolvedAgentId,
+      share_token: shareToken,
+      photos: photos,
       property_address: property.address,
       barrio: property.barrio ?? null,
       rooms: property.rooms ?? null,
@@ -328,6 +368,7 @@ Deno.serve(async (req) => {
 
   return new Response(JSON.stringify({
     appraisal_id: appraisalId,
+    share_token: shareToken,
     suggested_price_low_usd: lowUsd,
     suggested_price_high_usd: highUsd,
     comparables,
