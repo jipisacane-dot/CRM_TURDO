@@ -143,6 +143,15 @@ export default function Appraisals() {
       <PageHeader
         title="Tasación de propiedad"
         subtitle="Completá los datos del depto y la IA arma una tasación profesional con comparables del mercado actual + PDF listo para mandar al cliente."
+        actions={step === 'form' ? (
+          <button
+            onClick={submit}
+            disabled={!property.address.trim()}
+            className="bg-crimson hover:bg-crimson-light text-white px-4 py-2 rounded-xl text-sm font-semibold disabled:opacity-50 transition-colors whitespace-nowrap"
+          >
+            ✨ Generar tasación
+          </button>
+        ) : undefined}
       />
 
       {step === 'form' && (
@@ -275,24 +284,22 @@ export default function Appraisals() {
           </Section>
 
           {error && <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl p-3 text-sm">{error}</div>}
-        </div>
-      )}
 
-      {/* Botón sticky de submit (solo en step form) — siempre visible */}
-      {step === 'form' && (
-        <div className="sticky bottom-4 z-10 bg-white border border-border rounded-2xl shadow-lg p-3">
-          <button
-            onClick={submit}
-            disabled={!property.address.trim()}
-            className="w-full bg-crimson hover:bg-crimson-light text-white py-3 rounded-xl text-sm font-semibold disabled:opacity-50 transition-colors"
-          >
-            ✨ Generar tasación con IA
-          </button>
-          <p className="text-[11px] text-muted text-center mt-1.5">
-            {!property.address.trim()
-              ? 'Cargá al menos la dirección para tasar'
-              : 'La IA tarda 5-10 segundos. Después descargás el PDF profesional.'}
-          </p>
+          {/* Botón submit al final del form, normal (no sticky) */}
+          <div className="pt-2">
+            <button
+              onClick={submit}
+              disabled={!property.address.trim()}
+              className="w-full bg-crimson hover:bg-crimson-light text-white py-3 rounded-xl text-sm font-semibold disabled:opacity-50 transition-colors"
+            >
+              ✨ Generar tasación con IA
+            </button>
+            <p className="text-[11px] text-muted text-center mt-2">
+              {!property.address.trim()
+                ? 'Cargá al menos la dirección para tasar'
+                : 'La IA tarda 5-10 segundos. Después descargás el PDF profesional.'}
+            </p>
+          </div>
         </div>
       )}
 
