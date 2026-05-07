@@ -32,6 +32,12 @@ export interface Message {
   channel: Channel;
   agentId?: string;
   read: boolean;
+  media_type?: 'image' | 'video' | 'audio' | 'document' | 'sticker' | null;
+  media_url?: string | null;
+  media_caption?: string | null;
+  media_mime?: string | null;
+  media_filename?: string | null;
+  media_size_bytes?: number | null;
 }
 
 export interface Lead {
@@ -51,6 +57,12 @@ export interface Lead {
   messages: Message[];
   notes?: string;
   tags?: string[];
+  current_stage_key?: string;
+  stage_changed_at?: string;
+  duplicate_of?: string | null;
+  quality_label?: 'hot' | 'warm' | 'cold' | null;
+  quality_score?: number | null;
+  quality_reason?: string | null;
 }
 
 export interface PortalStat {

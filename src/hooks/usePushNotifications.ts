@@ -1,7 +1,24 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../services/supabase';
 
-const VAPID_PUBLIC = import.meta.env.VITE_VAPID_PUBLIC_KEY as string;
+const VAPID_PUBLIC_ENV = import.meta.env.VITE_VAPID_PUBLIC_KEY as string | undefined;
+
+let _vapidCache: string | null = null;
+async function getVapidPublic(): Promise<string> {
+  if (VAPID_PUBLIC_ENV) return VAPID_PUBLIC_ENV;
+  if (_vapidCache) return _vapidCache;
+  try {
+    const { data } = await supabase.functions.invoke('get-vapid-public', { body: {} });
+    const key = (data as { vapidPublicKey?: string })?.vapidPublicKey;
+    if (key) {
+      _vapidCache = key;
+      return key;
+    }
+  } catch (e) {
+    console.error('get-vapid-public err', e);
+  }
+  return '';
+}
 
 function getSessionAgentId(): string {
   try {
@@ -42,16 +59,17 @@ export const usePushNotifications = () => {
   }, []);
 
   const subscribe = async () => {
-    if (!VAPID_PUBLIC) {
-      console.warn('VITE_VAPID_PUBLIC_KEY not set');
-      return;
-    }
     setLoading(true);
     try {
+      const vapidKey = await getVapidPublic();
+      if (!vapidKey) {
+        alert('No se pudo obtener la clave VAPID. Avisá al admin.');
+        return;
+      }
       const reg = await navigator.serviceWorker.ready;
       const sub = await reg.pushManager.subscribe({
         userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC),
+        applicationServerKey: urlBase64ToUint8Array(vapidKey),
       });
 
       const key = sub.getKey('p256dh');

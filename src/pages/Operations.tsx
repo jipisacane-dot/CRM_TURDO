@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useApp } from '../contexts/AppContext';
 import { Modal } from '../components/ui/Modal';
+import { tokko } from '../services/tokko';
 import {
   agentsApi,
   operationsApi,
@@ -41,9 +42,11 @@ const todayISO = () => new Date().toISOString().slice(0, 10);
 
 interface NewOpDraft {
   property_id: string;
+  newPropCode: string;
   newPropAddress: string;
-  newPropRooms: string;
   newPropPrice: string;
+  newPropBarrio: string;
+  newPropCoverFile: File | null;
   vendedor_id: string;
   captador_id: string;
   contact_id: string;
@@ -58,9 +61,11 @@ interface NewOpDraft {
 
 const blankDraft = (): NewOpDraft => ({
   property_id: '',
+  newPropCode: '',
   newPropAddress: '',
-  newPropRooms: '',
   newPropPrice: '',
+  newPropBarrio: '',
+  newPropCoverFile: null,
   vendedor_id: '',
   captador_id: '',
   contact_id: '',
@@ -85,8 +90,12 @@ export default function Operations() {
   const [summary, setSummary] = useState<PipelineSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
+  const [modalStep, setModalStep] = useState<'form' | 'docs'>('form');
+  const [createdOpId, setCreatedOpId] = useState<string | null>(null);
+  const [createdOpDocs, setCreatedOpDocs] = useState<DBDocument[]>([]);
   const [draft, setDraft] = useState<NewOpDraft>(blankDraft());
   const [saving, setSaving] = useState(false);
+  const [tokkoLookup, setTokkoLookup] = useState<{ status: 'idle' | 'searching' | 'found' | 'notfound'; cover?: string | null }>({ status: 'idle' });
   const [statusTab, setStatusTab] = useState<OperationStatus | 'all'>('all');
   const [filterAgent, setFilterAgent] = useState<string>('all');
   const [detailOp, setDetailOp] = useState<OperationWithRefs | null>(null);
@@ -129,6 +138,42 @@ export default function Operations() {
   useEffect(() => { void refresh(); }, []);
 
   const sellableAgents = useMemo(() => agents.filter(a => a.role === 'agent' && a.active), [agents]);
+  const myAgentId = useMemo(() => agents.find(a => a.email === currentUser.email)?.id ?? null, [agents, currentUser.email]);
+
+  // Auto-completar desde Tokko cuando vendedor tipea código de propiedad
+  useEffect(() => {
+    if (!modalOpen || modalStep !== 'form' || draft.property_id) {
+      setTokkoLookup({ status: 'idle' });
+      return;
+    }
+    const code = draft.newPropCode.trim();
+    if (code.length < 3) {
+      setTokkoLookup({ status: 'idle' });
+      return;
+    }
+    setTokkoLookup({ status: 'searching' });
+    const t = setTimeout(async () => {
+      try {
+        const found = await tokko.findByCode(code);
+        if (!found) {
+          setTokkoLookup({ status: 'notfound' });
+          return;
+        }
+        // Autocompletar campos vacíos (no pisar lo que el vendedor ya tipeó manual)
+        setDraft(prev => ({
+          ...prev,
+          newPropAddress: prev.newPropAddress || found.address,
+          newPropBarrio: prev.newPropBarrio || found.location || '',
+          newPropPrice: prev.newPropPrice || (found.mainPrice ? String(found.mainPrice) : ''),
+          precio_venta_usd: prev.precio_venta_usd || (found.mainPrice ? String(found.mainPrice) : ''),
+        }));
+        setTokkoLookup({ status: 'found', cover: found.coverPhoto });
+      } catch {
+        setTokkoLookup({ status: 'notfound' });
+      }
+    }, 400);
+    return () => clearTimeout(t);
+  }, [draft.newPropCode, modalOpen, modalStep, draft.property_id]);
 
   const filtered = useMemo(() => {
     return ops.filter(o => {
@@ -150,12 +195,26 @@ export default function Operations() {
 
   const openNew = () => {
     setDraft(blankDraft());
+    setModalStep('form');
+    setCreatedOpId(null);
+    setCreatedOpDocs([]);
     setModalOpen(true);
   };
 
+  const closeModal = () => {
+    setModalOpen(false);
+    setModalStep('form');
+    setCreatedOpId(null);
+    setCreatedOpDocs([]);
+  };
+
   const handleSave = async () => {
-    if (!draft.vendedor_id || !draft.precio_venta_usd) {
-      alert('Completá vendedor y precio.');
+    if (isAdmin && !draft.vendedor_id) {
+      alert('Elegí qué vendedor cargó la venta.');
+      return;
+    }
+    if (!draft.precio_venta_usd) {
+      alert('Cargá el precio de venta.');
       return;
     }
     if (draft.status !== 'reservada' && !draft.fecha_boleto) {
@@ -166,6 +225,13 @@ export default function Operations() {
       alert('Indicá la fecha de la reserva.');
       return;
     }
+    // Si NO es admin, el vendedor se setea automáticamente al usuario logueado
+    const vendedorId = isAdmin ? draft.vendedor_id : (myAgentId ?? draft.vendedor_id);
+    if (!vendedorId) {
+      alert('No pudimos identificar tu perfil de vendedor. Avisale a Leticia.');
+      return;
+    }
+
     setSaving(true);
     try {
       let propertyId = draft.property_id;
@@ -176,25 +242,41 @@ export default function Operations() {
           setSaving(false);
           return;
         }
+        // Si encontramos la propiedad en Tokko y el vendedor no subió otra foto, usamos la de Tokko
+        const tokkoCoverUrl = (tokkoLookup.status === 'found' && tokkoLookup.cover && !draft.newPropCoverFile)
+          ? tokkoLookup.cover : null;
+
         const newProp = await propertiesApi.create({
           address: draft.newPropAddress,
           description: null,
-          rooms: draft.newPropRooms ? Number(draft.newPropRooms) : null,
+          rooms: null,
           surface_m2: null,
           list_price_usd: draft.newPropPrice ? Number(draft.newPropPrice) : null,
-          status: draft.status === 'reservada' ? 'reservada' : 'vendida',
+          status: draft.status === 'reservada' ? 'reservada' : 'disponible',
           captador_id: draft.captador_id || null,
           fecha_consignacion: todayISO(),
-          tokko_sku: null,
+          tokko_sku: draft.newPropCode || null,
           notes: null,
+          barrio: draft.newPropBarrio || null,
+          cover_photo_url: tokkoCoverUrl,
         });
         propertyId = newProp.id;
+
+        // Subir foto de portada si la cargó (sobreescribe la de Tokko si la hay)
+        if (draft.newPropCoverFile) {
+          try {
+            await propertiesApi.uploadCoverPhoto(propertyId, draft.newPropCoverFile);
+          } catch (e) {
+            console.error('Error subiendo foto de portada', e);
+            // No bloqueamos el flujo si falla la foto
+          }
+        }
       }
 
-      await operationsApi.create({
+      const newOp = await operationsApi.create({
         property_id: propertyId,
         captador_id: draft.captador_id || null,
-        vendedor_id: draft.vendedor_id,
+        vendedor_id: vendedorId,
         precio_venta_usd: Number(draft.precio_venta_usd),
         fecha_boleto: draft.fecha_boleto || todayISO(),
         fecha_escritura: draft.fecha_escritura || null,
@@ -204,15 +286,45 @@ export default function Operations() {
         status: draft.status,
         cancelled_at: null,
         cancelled_reason: null,
+        // Auto-aprobado si lo carga el admin, sino queda pendiente
+        approval_status: isAdmin ? 'approved' : 'pending',
+        approved_by: isAdmin ? (currentUser.id ?? null) : null,
+        approved_at: null, // trigger lo setea
+        rejected_reason: null,
+        paid_at: null,
+        agency_commission_pct: 6,
         notes: draft.notes || null,
       });
-      setModalOpen(false);
+      // Pasar a step 2 (docs) en vez de cerrar
+      setCreatedOpId(newOp.id);
+      setModalStep('docs');
+      setCreatedOpDocs([]);
       await refresh();
     } catch (e) {
       console.error(e);
       alert('Error al guardar la operación: ' + (e as Error).message);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleStepDocsUpload = async (file: File, category: string, title: string) => {
+    if (!createdOpId) return;
+    if (file.size > 20 * 1024 * 1024) {
+      alert('El archivo supera 20MB.');
+      return;
+    }
+    try {
+      await documentsApi.upload({
+        operationId: createdOpId,
+        file,
+        category,
+        title: title || file.name,
+      });
+      const docs = await documentsApi.listForOperation(createdOpId);
+      setCreatedOpDocs(docs);
+    } catch (e) {
+      alert('Error subiendo: ' + (e as Error).message);
     }
   };
 
@@ -332,14 +444,12 @@ export default function Operations() {
           <h1 className="text-2xl font-bold text-[#0F172A]">Operaciones</h1>
           <p className="text-muted text-sm mt-0.5">Pipeline de ventas — desde reserva hasta escritura</p>
         </div>
-        {isAdmin && (
-          <button
-            onClick={openNew}
-            className="px-4 py-2.5 bg-crimson hover:bg-crimson-bright text-white rounded-xl text-sm font-medium transition-all"
-          >
-            + Cargar operación
-          </button>
-        )}
+        <button
+          onClick={openNew}
+          className="px-4 py-2.5 bg-crimson hover:bg-crimson-bright text-white rounded-xl text-sm font-medium transition-all"
+        >
+          {isAdmin ? '+ Cargar operación' : '+ Cargar venta'}
+        </button>
       </div>
 
       {/* Pipeline summary */}
@@ -351,18 +461,14 @@ export default function Operations() {
       </div>
 
       {/* Stats secundarias */}
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-2 gap-4">
         <div className="bg-white border border-border rounded-2xl p-4">
           <div className="text-muted text-xs uppercase tracking-wider mb-1">Volumen vista actual</div>
           <div className="text-xl font-bold text-[#0F172A]">{fmtUSD(totalActiveVolume)}</div>
         </div>
         <div className="bg-white border border-border rounded-2xl p-4">
-          <div className="text-muted text-xs uppercase tracking-wider mb-1">Comisión Turdo (3%)</div>
-          <div className="text-xl font-bold text-emerald-600">{fmtUSD(totalActiveVolume * 0.03)}</div>
-        </div>
-        <div className="bg-white border border-border rounded-2xl p-4">
-          <div className="text-muted text-xs uppercase tracking-wider mb-1">Comisión equipo (2%)</div>
-          <div className="text-xl font-bold text-crimson">{fmtUSD(totalActiveVolume * 0.02)}</div>
+          <div className="text-muted text-xs uppercase tracking-wider mb-1">Comisión Turdo (6%)</div>
+          <div className="text-xl font-bold text-emerald-600">{fmtUSD(totalActiveVolume * 0.06)}</div>
         </div>
       </div>
 
@@ -454,9 +560,23 @@ export default function Operations() {
                     <td className="px-4 py-3 text-sm text-[#0F172A]">{op.vendedor?.name ?? '—'}</td>
                     <td className="px-4 py-3 text-sm text-right text-[#0F172A] font-semibold tabular-nums">{fmtUSD(Number(op.precio_venta_usd))}</td>
                     <td className="px-4 py-3 text-sm">
-                      <span className={`inline-block px-2 py-1 rounded-md text-xs font-medium border ${STATUS_COLOR[op.status]}`}>
-                        {STATUS_LABEL[op.status]}
-                      </span>
+                      <div className="flex flex-col gap-1">
+                        <span className={`inline-block px-2 py-1 rounded-md text-xs font-medium border ${STATUS_COLOR[op.status]} w-fit`}>
+                          {STATUS_LABEL[op.status]}
+                        </span>
+                        {op.approval_status === 'pending' && (
+                          <span className="inline-block px-2 py-0.5 rounded-md text-[10px] font-medium border bg-amber-100 text-amber-700 border-amber-200 w-fit">⏳ Pendiente aprobación</span>
+                        )}
+                        {op.approval_status === 'rejected' && (
+                          <span className="inline-block px-2 py-0.5 rounded-md text-[10px] font-medium border bg-red-100 text-red-700 border-red-200 w-fit" title={op.rejected_reason ?? ''}>✗ Rechazada</span>
+                        )}
+                        {op.approval_status === 'approved' && op.paid_at && (
+                          <span className="inline-block px-2 py-0.5 rounded-md text-[10px] font-medium border bg-emerald-100 text-emerald-700 border-emerald-200 w-fit">✓ Pagada</span>
+                        )}
+                        {op.approval_status === 'approved' && !op.paid_at && (
+                          <span className="inline-block px-2 py-0.5 rounded-md text-[10px] font-medium border bg-sky-100 text-sky-700 border-sky-200 w-fit">✓ Aprobada · por cobrar</span>
+                        )}
+                      </div>
                     </td>
                     {isAdmin ? (
                       <td className="px-4 py-3 text-sm">
@@ -502,7 +622,8 @@ export default function Operations() {
       </div>
 
       {/* Modal cargar venta */}
-      <Modal open={modalOpen} onClose={() => setModalOpen(false)} title="Cargar operación" width="max-w-2xl">
+      <Modal open={modalOpen} onClose={closeModal} title={modalStep === 'form' ? 'Cargar operación' : '✓ Operación creada — Subí los documentos'} width="max-w-2xl">
+        {modalStep === 'form' && (
         <div className="space-y-4">
           {/* Estado inicial */}
           <div>
@@ -522,9 +643,14 @@ export default function Operations() {
               ))}
             </div>
             <p className="text-[11px] text-muted mt-1">
-              {draft.status === 'reservada' && 'Sin comisiones todavía. Se generan cuando se firma el boleto.'}
-              {draft.status === 'boleto' && 'Se generan las comisiones automáticamente.'}
-              {draft.status === 'escriturada' && 'Se generan las comisiones y se marca la propiedad como vendida.'}
+              {isAdmin
+                ? (draft.status === 'reservada'
+                    ? 'Sin comisiones todavía. Se generan cuando se firma el boleto y la venta queda aprobada.'
+                    : 'Como admin, esta venta queda aprobada y se calculan las comisiones automáticamente.')
+                : (draft.status === 'reservada'
+                    ? 'Cargá la reserva. Cuando firmes el boleto, Leticia aprueba la venta.'
+                    : 'La venta queda pendiente de aprobación de Leticia. Vas a recibir notificación cuando la apruebe o rechace.')
+              }
             </p>
           </div>
 
@@ -545,25 +671,46 @@ export default function Operations() {
 
           {!draft.property_id && (
             <div className="bg-bg-hover rounded-xl p-4 space-y-3 border border-border">
-              <div className="text-xs text-muted uppercase tracking-wider font-medium">Nueva propiedad</div>
-              <div>
-                <label className="text-xs text-muted mb-1 block">Dirección</label>
-                <input
-                  value={draft.newPropAddress}
-                  onChange={(e) => setDraft({ ...draft, newPropAddress: e.target.value })}
-                  className="w-full bg-white border border-border rounded-xl px-3 py-2 text-sm text-[#0F172A]"
-                  placeholder="Ej: Brown 1645, 3° A — Centro MdP"
-                />
+              <div className="flex items-center justify-between">
+                <div className="text-xs text-muted uppercase tracking-wider font-medium">Nueva propiedad</div>
+                {tokkoLookup.status === 'searching' && (
+                  <div className="text-xs text-muted">Buscando en Tokko…</div>
+                )}
+                {tokkoLookup.status === 'found' && (
+                  <div className="text-xs text-emerald-700 font-medium">✓ Encontrada en Tokko</div>
+                )}
+                {tokkoLookup.status === 'notfound' && draft.newPropCode.length >= 3 && (
+                  <div className="text-xs text-amber-700">No la encontramos en Tokko · cargá manual</div>
+                )}
+              </div>
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label className="text-xs text-muted mb-1 block">Código *</label>
+                  <input
+                    value={draft.newPropCode}
+                    onChange={(e) => setDraft({ ...draft, newPropCode: e.target.value })}
+                    className="w-full bg-white border border-border rounded-xl px-3 py-2 text-sm text-[#0F172A]"
+                    placeholder="Ej: TUR-1234"
+                  />
+                </div>
+                <div className="col-span-2">
+                  <label className="text-xs text-muted mb-1 block">Ubicación exacta *</label>
+                  <input
+                    value={draft.newPropAddress}
+                    onChange={(e) => setDraft({ ...draft, newPropAddress: e.target.value })}
+                    className="w-full bg-white border border-border rounded-xl px-3 py-2 text-sm text-[#0F172A]"
+                    placeholder="Ej: Brown 1645, 3° A — MdP"
+                  />
+                </div>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs text-muted mb-1 block">Ambientes</label>
+                  <label className="text-xs text-muted mb-1 block">Barrio / Zona</label>
                   <input
-                    type="number"
-                    value={draft.newPropRooms}
-                    onChange={(e) => setDraft({ ...draft, newPropRooms: e.target.value })}
+                    value={draft.newPropBarrio}
+                    onChange={(e) => setDraft({ ...draft, newPropBarrio: e.target.value })}
                     className="w-full bg-white border border-border rounded-xl px-3 py-2 text-sm text-[#0F172A]"
-                    placeholder="3"
+                    placeholder="Centro · Plaza Mitre · etc."
                   />
                 </div>
                 <div>
@@ -576,6 +723,27 @@ export default function Operations() {
                     placeholder="143900"
                   />
                 </div>
+              </div>
+              <div>
+                <label className="text-xs text-muted mb-1 block">Foto de portada</label>
+                {tokkoLookup.status === 'found' && tokkoLookup.cover && !draft.newPropCoverFile ? (
+                  <div className="flex items-center gap-3 bg-white border border-border rounded-xl p-2">
+                    <img src={tokkoLookup.cover} alt="Portada Tokko" className="w-20 h-14 rounded-md object-cover" />
+                    <div className="flex-1 min-w-0">
+                      <div className="text-xs text-emerald-700 font-medium">Foto traída de Tokko</div>
+                      <div className="text-[10px] text-muted">Si querés reemplazarla, subí otra acá abajo.</div>
+                    </div>
+                  </div>
+                ) : null}
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => setDraft({ ...draft, newPropCoverFile: e.target.files?.[0] ?? null })}
+                  className="w-full text-xs text-muted file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-medium file:bg-crimson file:text-white hover:file:bg-crimson-bright cursor-pointer mt-2"
+                />
+                {draft.newPropCoverFile && (
+                  <div className="text-[10px] text-muted mt-1">{draft.newPropCoverFile.name} ({Math.round(draft.newPropCoverFile.size / 1024)} KB)</div>
+                )}
               </div>
             </div>
           )}
@@ -592,19 +760,28 @@ export default function Operations() {
                 <option value="">— Sin captador —</option>
                 {sellableAgents.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
               </select>
-              <p className="text-[10px] text-muted mt-1">1% del precio</p>
+              <p className="text-[10px] text-muted mt-1">Quién consignó la propiedad (informativo)</p>
             </div>
             <div>
-              <label className="text-sm font-medium text-[#0F172A] mb-1.5 block">Vendedor *</label>
-              <select
-                value={draft.vendedor_id}
-                onChange={(e) => setDraft({ ...draft, vendedor_id: e.target.value })}
-                className="w-full bg-white border border-border rounded-xl px-3 py-2 text-sm text-[#0F172A]"
-              >
-                <option value="">— Elegir —</option>
-                {sellableAgents.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-              </select>
-              <p className="text-[10px] text-muted mt-1">1% del precio</p>
+              <label className="text-sm font-medium text-[#0F172A] mb-1.5 block">Vendedor {isAdmin && '*'}</label>
+              {isAdmin ? (
+                <select
+                  value={draft.vendedor_id}
+                  onChange={(e) => setDraft({ ...draft, vendedor_id: e.target.value })}
+                  className="w-full bg-white border border-border rounded-xl px-3 py-2 text-sm text-[#0F172A]"
+                >
+                  <option value="">— Elegir —</option>
+                  {sellableAgents.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                </select>
+              ) : (
+                <input
+                  type="text"
+                  value={agents.find(a => a.id === myAgentId)?.name ?? currentUser.name ?? 'Vos'}
+                  disabled
+                  className="w-full bg-bg-hover border border-border rounded-xl px-3 py-2 text-sm text-muted"
+                />
+              )}
+              <p className="text-[10px] text-muted mt-1">Cobra escalonado: 1ra 20% · 2da 25% · 3ra+ 30% sobre el 6% de Turdo</p>
             </div>
           </div>
 
@@ -656,13 +833,14 @@ export default function Operations() {
                 />
               </div>
               <div>
-                <label className="text-sm font-medium text-[#0F172A] mb-1.5 block">Fecha escritura</label>
+                <label className="text-sm font-medium text-[#0F172A] mb-1.5 block">
+                  Fecha escritura {draft.status === 'boleto' && <span className="text-muted text-xs font-normal">(opcional)</span>}
+                </label>
                 <input
                   type="date"
                   value={draft.fecha_escritura}
                   onChange={(e) => setDraft({ ...draft, fecha_escritura: e.target.value })}
                   className="w-full bg-white border border-border rounded-xl px-3 py-2 text-sm text-[#0F172A]"
-                  disabled={draft.status === 'boleto'}
                 />
               </div>
             </div>
@@ -738,25 +916,31 @@ export default function Operations() {
           </div>
 
           {/* Preview comisiones */}
-          {draft.precio_venta_usd && Number(draft.precio_venta_usd) > 0 && draft.status !== 'reservada' && (
-            <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-sm">
-              <div className="font-medium text-emerald-800 mb-1">Comisiones que se generarán:</div>
-              <div className="text-emerald-700">
-                Vendedor: <span className="font-semibold">{fmtUSD(Number(draft.precio_venta_usd) * 0.01)}</span>
-                {draft.captador_id && <> · Captador: <span className="font-semibold">{fmtUSD(Number(draft.precio_venta_usd) * 0.01)}</span></>}
-                {' · '}Casa Turdo: <span className="font-semibold">{fmtUSD(Number(draft.precio_venta_usd) * 0.03)}</span>
+          {draft.precio_venta_usd && Number(draft.precio_venta_usd) > 0 && draft.status !== 'reservada' && (() => {
+            const precio = Number(draft.precio_venta_usd);
+            const turdo = precio * 0.06;
+            return (
+              <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-sm">
+                <div className="font-medium text-emerald-800 mb-1">Comisiones (al aprobarse):</div>
+                <div className="text-emerald-700 space-y-0.5">
+                  <div>Turdo (6%): <span className="font-semibold">{fmtUSD(turdo)}</span></div>
+                  <div className="text-xs">Vendedor (escalonado según orden de venta del mes):</div>
+                  <div className="text-xs ml-3">· Si es 1ra del mes (20%): {fmtUSD(turdo * 0.20)}</div>
+                  <div className="text-xs ml-3">· Si es 2da (25%): {fmtUSD(turdo * 0.25)}</div>
+                  <div className="text-xs ml-3">· Si es 3ra+ (30%): {fmtUSD(turdo * 0.30)}</div>
+                </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
           {draft.status === 'reservada' && (
             <div className="bg-sky-50 border border-sky-200 rounded-xl p-3 text-sm text-sky-800">
-              Las comisiones se van a generar automáticamente cuando avances esta operación a "Boleto firmado".
+              Las comisiones se van a generar automáticamente cuando avances esta operación a "Boleto firmado" y Leticia la apruebe.
             </div>
           )}
 
           <div className="flex justify-end gap-2 pt-2">
             <button
-              onClick={() => setModalOpen(false)}
+              onClick={closeModal}
               disabled={saving}
               className="px-4 py-2 text-sm rounded-xl border border-border text-[#475569] hover:bg-bg-hover transition-all"
             >
@@ -767,10 +951,45 @@ export default function Operations() {
               disabled={saving}
               className="px-4 py-2 text-sm rounded-xl bg-crimson text-white hover:bg-crimson-bright transition-all disabled:opacity-60"
             >
-              {saving ? 'Guardando…' : 'Guardar operación'}
+              {saving ? 'Guardando…' : 'Guardar y subir docs →'}
             </button>
           </div>
         </div>
+        )}
+
+        {modalStep === 'docs' && createdOpId && (
+          <div className="space-y-4">
+            <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-sm text-emerald-800">
+              Operación cargada. Subí los documentos que tengas (boleto, escritura, comprobante de seña, etc.).
+              No son obligatorios — podés cerrar y subirlos después desde el detalle de la operación.
+            </div>
+
+            <DocsUploadStep
+              docs={createdOpDocs}
+              onUpload={handleStepDocsUpload}
+              onDelete={async (doc) => {
+                await documentsApi.remove(doc);
+                if (createdOpId) {
+                  const docs = await documentsApi.listForOperation(createdOpId);
+                  setCreatedOpDocs(docs);
+                }
+              }}
+              onPreview={async (doc) => {
+                const url = await documentsApi.getPublicUrl(doc.file_path);
+                window.open(url, '_blank');
+              }}
+            />
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                onClick={closeModal}
+                className="px-4 py-2 text-sm rounded-xl bg-crimson text-white hover:bg-crimson-bright transition-all"
+              >
+                Listo
+              </button>
+            </div>
+          </div>
+        )}
       </Modal>
 
       {/* Modal detalle operación */}
@@ -943,6 +1162,117 @@ export default function Operations() {
           </div>
         )}
       </Modal>
+    </div>
+  );
+}
+
+// ── Sub-componente: paso 2 de upload de docs en el modal de carga ──────────
+interface DocsUploadStepProps {
+  docs: DBDocument[];
+  onUpload: (file: File, category: string, title: string) => Promise<void>;
+  onDelete: (doc: DBDocument) => Promise<void>;
+  onPreview: (doc: DBDocument) => Promise<void>;
+}
+
+function DocsUploadStep({ docs, onUpload, onDelete, onPreview }: DocsUploadStepProps) {
+  const [category, setCategory] = useState<string>('boleto');
+  const [title, setTitle] = useState('');
+  const [uploading, setUploading] = useState(false);
+
+  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    try {
+      await onUpload(file, category, title);
+      setTitle('');
+      e.target.value = '';
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const docsByCategory = useMemo(() => {
+    const map = new Map<string, DBDocument[]>();
+    for (const d of docs) {
+      const arr = map.get(d.category) ?? [];
+      arr.push(d);
+      map.set(d.category, arr);
+    }
+    return map;
+  }, [docs]);
+
+  return (
+    <div className="space-y-4">
+      {/* Form de upload */}
+      <div className="bg-bg-hover rounded-xl p-4 space-y-3 border border-border">
+        <div className="text-xs text-muted uppercase tracking-wider font-medium">Subir nuevo documento</div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="text-xs text-muted mb-1 block">Tipo</label>
+            <select
+              value={category}
+              onChange={(e) => setCategory(e.target.value)}
+              className="w-full bg-white border border-border rounded-xl px-3 py-2 text-sm text-[#0F172A]"
+            >
+              {DOC_CATEGORIES.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="text-xs text-muted mb-1 block">Título (opcional)</label>
+            <input
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              className="w-full bg-white border border-border rounded-xl px-3 py-2 text-sm text-[#0F172A]"
+              placeholder="Ej: Boleto firmado 04/05"
+            />
+          </div>
+        </div>
+        <input
+          type="file"
+          onChange={(e) => void handleFile(e)}
+          disabled={uploading}
+          className="w-full text-xs text-muted file:mr-3 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-xs file:font-medium file:bg-crimson file:text-white hover:file:bg-crimson-bright disabled:opacity-50"
+        />
+        {uploading && <div className="text-xs text-muted">Subiendo…</div>}
+      </div>
+
+      {/* Lista de docs ya subidos en este flow */}
+      {docs.length > 0 && (
+        <div>
+          <div className="text-xs text-muted uppercase tracking-wider font-medium mb-2">Subidos ({docs.length})</div>
+          <div className="space-y-2">
+            {Array.from(docsByCategory.entries()).map(([cat, list]) => {
+              const label = DOC_CATEGORIES.find(c => c.key === cat)?.label ?? cat;
+              return (
+                <div key={cat} className="bg-white border border-border rounded-xl p-3">
+                  <div className="text-xs font-semibold text-[#0F172A] mb-1.5">{label}</div>
+                  <div className="space-y-1">
+                    {list.map(d => (
+                      <div key={d.id} className="flex items-center justify-between gap-2 text-sm">
+                        <button
+                          onClick={() => void onPreview(d)}
+                          className="text-[#0F172A] hover:text-crimson transition-colors text-left flex-1 truncate"
+                          title={d.file_name}
+                        >
+                          {d.title}
+                        </button>
+                        <span className="text-[10px] text-muted">{d.file_size ? Math.round(d.file_size / 1024) + ' KB' : ''}</span>
+                        <button
+                          onClick={() => void onDelete(d)}
+                          className="text-xs text-red-600 hover:bg-red-50 px-2 py-0.5 rounded"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

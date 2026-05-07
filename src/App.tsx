@@ -14,14 +14,35 @@ const Team = lazy(() => import('./pages/Team'));
 const Calendar = lazy(() => import('./pages/Calendar'));
 const Analytics = lazy(() => import('./pages/Analytics'));
 const Operations = lazy(() => import('./pages/Operations'));
+const Negotiations = lazy(() => import('./pages/Negotiations'));
+const AssistantChat = lazy(() => import('./pages/AssistantChat'));
+const Pipeline = lazy(() => import('./pages/Pipeline'));
+const NotificationRules = lazy(() => import('./pages/NotificationRules'));
+const Templates = lazy(() => import('./pages/Templates'));
+const AutoAssign = lazy(() => import('./pages/AutoAssign'));
+const ClientPortalPreview = lazy(() => import('./pages/ClientPortalPreview'));
+const ClientPortal = lazy(() => import('./pages/ClientPortal'));
+const AuditLog = lazy(() => import('./pages/AuditLog'));
+const Matches = lazy(() => import('./pages/Matches'));
+const Appraisals = lazy(() => import('./pages/Appraisals'));
+const AppraisalList = lazy(() => import('./pages/AppraisalList'));
+const AppraisalPublic = lazy(() => import('./pages/AppraisalPublic'));
 const Payroll = lazy(() => import('./pages/Payroll'));
 const MyCommissions = lazy(() => import('./pages/MyCommissions'));
 const Finanzas = lazy(() => import('./pages/Finanzas'));
 const Vencimientos = lazy(() => import('./pages/Vencimientos'));
 
+// Skeleton de loading que matchea el layout general (no flash blanco)
 const PageLoader = () => (
-  <div className="flex items-center justify-center h-[60vh]">
-    <div className="text-muted text-sm animate-pulse">Cargando…</div>
+  <div className="p-4 md:p-6 space-y-4 max-w-5xl">
+    <div className="skeleton h-8 w-48" />
+    <div className="skeleton h-4 w-64" />
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-4">
+      <div className="skeleton h-24" />
+      <div className="skeleton h-24" />
+      <div className="skeleton h-24" />
+    </div>
+    <div className="skeleton h-64 mt-4" />
   </div>
 );
 
@@ -33,12 +54,18 @@ export default function App() {
           <Suspense fallback={<PageLoader />}>
             <Routes>
               <Route path="/login" element={<Login />} />
+              <Route path="/preview/portal" element={<ClientPortalPreview />} />
+              <Route path="/c/:token" element={<ClientPortal />} />
+              <Route path="/t/:token" element={<AppraisalPublic />} />
               <Route path="/"            element={<AppLayout><Dashboard /></AppLayout>} />
               <Route path="/inbox"       element={<AppLayout><Inbox /></AppLayout>} />
               <Route path="/contacts"    element={<AppLayout><Contacts /></AppLayout>} />
               <Route path="/leads"       element={<AppLayout><Leads /></AppLayout>} />
               <Route path="/properties"  element={<AppLayout><Properties /></AppLayout>} />
               <Route path="/operations"  element={<AppLayout><Operations /></AppLayout>} />
+              <Route path="/negotiations" element={<AppLayout><Negotiations /></AppLayout>} />
+              <Route path="/pipeline"    element={<AppLayout><Pipeline /></AppLayout>} />
+              <Route path="/asistente"   element={<AppLayout><AssistantChat /></AppLayout>} />
               <Route path="/payroll"     element={<AppLayout><Payroll /></AppLayout>} />
               <Route path="/my-commissions" element={<AppLayout><MyCommissions /></AppLayout>} />
               <Route path="/finanzas"    element={<AppLayout><Finanzas /></AppLayout>} />
@@ -46,6 +73,13 @@ export default function App() {
               <Route path="/team"        element={<AppLayout><Team /></AppLayout>} />
               <Route path="/calendar"    element={<AppLayout><Calendar /></AppLayout>} />
               <Route path="/analytics"   element={<AppLayout><Analytics /></AppLayout>} />
+              <Route path="/notifications" element={<AppLayout><NotificationRules /></AppLayout>} />
+              <Route path="/templates"   element={<AppLayout><Templates /></AppLayout>} />
+              <Route path="/auto-assign" element={<AppLayout><AutoAssign /></AppLayout>} />
+              <Route path="/audit"       element={<AppLayout><AuditLog /></AppLayout>} />
+              <Route path="/matches"     element={<AppLayout><Matches /></AppLayout>} />
+              <Route path="/tasar"       element={<AppLayout><Appraisals /></AppLayout>} />
+              <Route path="/tasaciones"  element={<AppLayout><AppraisalList /></AppLayout>} />
               <Route path="*"            element={<Navigate to="/" />} />
             </Routes>
           </Suspense>

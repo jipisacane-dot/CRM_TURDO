@@ -66,6 +66,26 @@ export const AGENTS: Agent[] = [
     role: 'agent',
     stats: { total: 0, active: 0, won: 0, lost: 0, responseTime: '—', conversionRate: 0 },
   },
+  {
+    id: 'andrea',
+    name: 'Andrea Méndez',
+    email: 'andrea@turdogroup.com',
+    phone: '+54 223 400-0007',
+    branch: 'Sucursal Norte',
+    avatar: 'AM',
+    role: 'agent',
+    stats: { total: 0, active: 0, won: 0, lost: 0, responseTime: '—', conversionRate: 0 },
+  },
+  {
+    id: 'rodrigo',
+    name: 'Rodrigo Ibáñez',
+    email: 'rodrigo@turdogroup.com',
+    phone: '+54 223 400-0008',
+    branch: 'Sucursal Centro',
+    avatar: 'RI',
+    role: 'agent',
+    stats: { total: 0, active: 0, won: 0, lost: 0, responseTime: '—', conversionRate: 0 },
+  },
 ];
 
 const now = new Date();

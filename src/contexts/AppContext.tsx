@@ -6,7 +6,7 @@ import { tokko } from '../services/tokko';
 
 // ── Convert Supabase rows → CRM Lead type ─────────────────────────────────────
 
-const toMessages = (rows: DBMessage[], channel: string) =>
+const toMessages = (rows: DBMessage[], channel: string): Lead['messages'] =>
   rows.map(m => ({
     id: m.id,
     direction: m.direction,
@@ -15,9 +15,15 @@ const toMessages = (rows: DBMessage[], channel: string) =>
     channel: channel as Lead['messages'][number]['channel'],
     agentId: m.agent_id ?? undefined,
     read: m.read,
+    media_type: (m.media_type as Lead['messages'][number]['media_type']) ?? null,
+    media_url: m.media_url ?? null,
+    media_caption: m.media_caption ?? null,
+    media_mime: m.media_mime ?? null,
+    media_filename: m.media_filename ?? null,
+    media_size_bytes: m.media_size_bytes ?? null,
   }));
 
-const toLead = (c: DBContact, messages: DBMessage[]): Lead => ({
+const toLead = (c: DBContact & { current_stage_key?: string | null; stage_changed_at?: string | null; duplicate_of?: string | null; quality_label?: string | null; quality_score?: number | null; quality_reason?: string | null }, messages: DBMessage[]): Lead => ({
   id: c.id,
   name: c.name ?? 'Sin nombre',
   phone: c.phone ?? undefined,
@@ -33,6 +39,12 @@ const toLead = (c: DBContact, messages: DBMessage[]): Lead => ({
   lastActivity: messages.length > 0 ? messages[messages.length - 1].created_at : c.created_at,
   messages: toMessages(messages, c.channel),
   notes: c.notes ?? undefined,
+  current_stage_key: c.current_stage_key ?? 'nuevo',
+  stage_changed_at: c.stage_changed_at ?? undefined,
+  duplicate_of: c.duplicate_of ?? undefined,
+  quality_label: (c.quality_label as Lead['quality_label']) ?? undefined,
+  quality_score: c.quality_score ?? undefined,
+  quality_reason: c.quality_reason ?? undefined,
 });
 
 // ── Context ───────────────────────────────────────────────────────────────────
@@ -77,14 +89,17 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const refreshLeads = useCallback(async () => {
     setLoading(true);
     try {
-      const contacts = await db.contacts.listWithMessages();
+      // Vendedores solo ven sus contactos asignados (filtro server-side).
+      // Admin (Leticia) ve todo.
+      const opts = currentUser.role === 'agent' ? { agentId: currentUser.id } : undefined;
+      const contacts = await db.contacts.listWithMessages(opts);
       setLeads(contacts.map(c => toLead(c, c.messages)));
     } catch (e) {
       console.error('Error cargando leads:', e);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [currentUser.id, currentUser.role]);
 
   const refreshReminders = useCallback(async () => {
     try {
@@ -132,8 +147,10 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   useEffect(() => {
     refreshLeads();
     refreshReminders();
-    // Pre-warm Tokko cache in background so Properties page loads instantly
-    if (tokko.hasKey()) tokko.getProperties().catch(() => {});
+    // Pre-warm Tokko cache pero diferido para no competir con la carga inicial
+    if (tokko.hasKey()) {
+      setTimeout(() => { tokko.getProperties().catch(() => {}); }, 1500);
+    }
   }, [refreshLeads, refreshReminders]);
 
   // Check reminders every 5 min

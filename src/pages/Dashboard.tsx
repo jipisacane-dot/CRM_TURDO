@@ -11,6 +11,7 @@ import { Avatar } from '../components/ui/Avatar';
 import type { Channel, Lead } from '../types';
 import { formatDistanceToNow } from 'date-fns';
 import { es } from 'date-fns/locale';
+import PageHeader from '../components/ui/PageHeader';
 
 const HOUR = 60 * 60 * 1000;
 
@@ -29,11 +30,14 @@ const msToHuman = (ms: number): string => {
   return `${Math.round(ms / (24 * HOUR))} d`;
 };
 
-const StatCard = ({ label, value, sub, color = 'text-white' }: { label: string; value: string | number; sub?: string; color?: string }) => (
-  <div className="bg-bg-card border border-border rounded-2xl p-5">
-    <div className="text-muted text-xs uppercase tracking-wider mb-2">{label}</div>
-    <div className={`text-3xl font-bold ${color}`}>{value}</div>
-    {sub && <div className="text-muted text-xs mt-1">{sub}</div>}
+const StatCard = ({ label, value, sub, color = 'text-[#0F172A]', icon }: { label: string; value: string | number; sub?: string; color?: string; icon?: string }) => (
+  <div className="bg-white border border-border rounded-2xl p-4 md:p-5 hover:border-crimson/30 transition-colors">
+    <div className="flex items-start justify-between gap-2 mb-2">
+      <div className="text-muted text-[11px] uppercase tracking-wider font-medium leading-tight">{label}</div>
+      {icon && <span className="text-xl flex-shrink-0">{icon}</span>}
+    </div>
+    <div className={`text-2xl md:text-3xl font-bold tabular-nums ${color}`}>{value}</div>
+    {sub && <div className="text-muted text-xs mt-1 truncate">{sub}</div>}
   </div>
 );
 
@@ -166,23 +170,51 @@ export default function Dashboard() {
     []
   );
 
+  const today = new Date().toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' });
+  const firstName = currentUser.name.split(' ')[0];
+
   return (
-    <div className="p-5 md:p-8 space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-white">Dashboard</h1>
-        <p className="text-muted text-sm mt-0.5">Resumen general · {new Date().toLocaleDateString('es-AR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
+    <div className="p-4 md:p-6 space-y-5 max-w-7xl">
+      <PageHeader
+        title={`Hola ${firstName} 👋`}
+        subtitle={`${today.charAt(0).toUpperCase() + today.slice(1)} · ${isAdmin ? 'panel de administración' : 'tu día en Turdo'}`}
+      />
+
+      {/* KPI principal — 4 cards de impacto */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <StatCard
+          label="Sin asignar"
+          value={stats.unassigned}
+          sub={stats.unassigned > 0 ? 'Requieren atención' : 'Todo asignado ✓'}
+          color={stats.unassigned > 0 ? 'text-rose-600' : 'text-emerald-600'}
+          icon="📥"
+        />
+        <StatCard
+          label="Nuevas hoy"
+          value={stats.newToday}
+          sub="Últimas 24hs"
+          color="text-blue-600"
+          icon="✨"
+        />
+        <StatCard
+          label="Activos"
+          value={stats.active}
+          sub="En seguimiento"
+          color="text-amber-600"
+          icon="🔥"
+        />
+        <StatCard
+          label="Cerrados"
+          value={stats.won}
+          sub="Operaciones ganadas"
+          color="text-emerald-600"
+          icon="🏆"
+        />
       </div>
 
-      {/* KPI Grid */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      {/* KPI secundario — datos contextuales */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <StatCard label="Consultas totales" value={stats.total} sub="Histórico" />
-        <StatCard label="Nuevas hoy" value={stats.newToday} sub="Últimas 24hs" color="text-blue-400" />
-        <StatCard label="Sin asignar" value={stats.unassigned} sub="Requieren atención" color={stats.unassigned > 0 ? 'text-red-400' : 'text-green-400'} />
-        <StatCard label="Cerrados" value={stats.won} sub="Operaciones ganadas" color="text-green-400" />
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <StatCard label="Activos" value={stats.active} sub="En seguimiento" color="text-yellow-400" />
         <StatCard label="Propiedades" value={PROPERTIES.filter(p => p.active).length} sub="Publicadas activas" />
         <StatCard label="Vendedores" value={AGENTS.filter(a => a.role === 'agent').length} sub="En 2 sucursales" />
         <StatCard label="Total clics" value={PROPERTIES.reduce((s, p) => s + p.totalClicks, 0).toLocaleString('es-AR')} sub="Todos los portales" />
@@ -190,10 +222,10 @@ export default function Dashboard() {
 
       {/* ── Follow-up alerts (admin only) ──────────────────────────────────── */}
       {isAdmin && (followUp.unassigned.length > 0 || followUp.noReply.length > 0 || followUp.stale.length > 0) && (
-        <div className="bg-bg-card border border-border rounded-2xl p-5">
+        <div className="bg-white border border-border rounded-2xl p-5">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <h3 className="text-white font-semibold flex items-center gap-2">
+              <h3 className="text-[#0F172A] font-semibold flex items-center gap-2">
                 <span>🚨</span> Alertas de seguimiento
               </h3>
               <p className="text-muted text-xs mt-0.5">Leads que requieren acción — no los pierdas</p>

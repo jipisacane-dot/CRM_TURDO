@@ -6,6 +6,14 @@ import { StatusBadge } from '../components/ui/StatusBadge';
 import { Avatar } from '../components/ui/Avatar';
 import { Modal } from '../components/ui/Modal';
 import { ReminderModal } from '../components/ui/ReminderModal';
+import TemplatePicker from '../components/TemplatePicker';
+import ReplySuggestions from '../components/ReplySuggestions';
+import ClientPortalButton from '../components/ClientPortalButton';
+import AttachMediaButton from '../components/AttachMediaButton';
+import RecordVoiceButton from '../components/RecordVoiceButton';
+import QualityBadge, { QualityFilter } from '../components/ui/QualityBadge';
+import MessageMedia from '../components/ui/MessageMedia';
+import { pipelineStagesApi, pipelineApi, type PipelineStage } from '../services/pipeline';
 import type { Channel, Lead } from '../types';
 import { formatDistanceToNow, format } from 'date-fns';
 import { es } from 'date-fns/locale';
@@ -33,22 +41,53 @@ function LeadAvatar({ lead, size = 'md' }: { lead: Lead; size?: 'sm' | 'md' }) {
 const ALL_CHANNELS: (Channel | 'all')[] = ['all', 'whatsapp', 'instagram', 'facebook', 'email', 'web', 'zonaprop', 'argenprop'];
 
 export default function Inbox() {
-  const { leads, assignLead, sendMessage, loading, dueReminders, completeReminder, currentUser } = useApp();
+  const { leads, assignLead, sendMessage, loading, dueReminders, completeReminder, currentUser, refreshLeads } = useApp();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [channelFilter, setChannelFilter] = useState<Channel | 'all'>('all');
+  const [qualityFilter, setQualityFilter] = useState<'all' | 'hot' | 'warm' | 'cold' | 'unrated'>('all');
   const [reply, setReply] = useState('');
   const [showAssign, setShowAssign] = useState(false);
   const [showReminder, setShowReminder] = useState(false);
   const [search, setSearch] = useState('');
   const [sendError, setSendError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
+  const [stages, setStages] = useState<PipelineStage[]>([]);
+  const [changingStage, setChangingStage] = useState(false);
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    void pipelineStagesApi.list().then(setStages);
+  }, []);
+
+  // Detectar ?lead=X en la URL para auto-seleccionar (viene desde Pipeline)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const leadId = params.get('lead');
+    if (leadId) setSelectedId(leadId);
+  }, []);
+
+  const changeStage = async (newKey: string) => {
+    if (!selected || changingStage) return;
+    if (selected.current_stage_key === newKey) return;
+    setChangingStage(true);
+    try {
+      await pipelineApi.changeStage(selected.id, newKey);
+      await refreshLeads();
+    } catch (e) {
+      alert('Error al cambiar etapa: ' + (e as Error).message);
+    } finally {
+      setChangingStage(false);
+    }
+  };
 
   const isAdmin = currentUser.role === 'admin';
   const scope = isAdmin ? leads : leads.filter(l => l.assignedTo === currentUser.id);
 
   const filtered = scope
     .filter(l => channelFilter === 'all' || l.channel === channelFilter)
+    .filter(l => qualityFilter === 'all' ||
+      (qualityFilter === 'unrated' ? !l.quality_label : l.quality_label === qualityFilter))
     .filter(l => !search || l.name.toLowerCase().includes(search.toLowerCase()) || (l.propertyTitle ?? '').toLowerCase().includes(search.toLowerCase()))
     .sort((a, b) => new Date(b.lastActivity).getTime() - new Date(a.lastActivity).getTime());
 
@@ -80,7 +119,10 @@ export default function Inbox() {
   const assignedAgent = selected?.assignedTo ? AGENTS.find(a => a.id === selected.assignedTo) : null;
 
   return (
-    <div className="flex h-[calc(100dvh-5rem)] md:h-screen overflow-hidden" style={{ background: '#F8F9FB' }}>
+    <div
+      className="flex h-[calc(100dvh-5rem-env(safe-area-inset-bottom))] md:h-screen overflow-hidden"
+      style={{ background: '#F8F9FB' }}
+    >
       {/* Conversation list */}
       <div className={`flex flex-col w-full md:w-80 lg:w-96 border-r border-border bg-bg-card flex-shrink-0 ${selectedId ? 'hidden md:flex' : 'flex'}`}>
         {/* Due reminders banner */}
@@ -134,6 +176,9 @@ export default function Inbox() {
               </button>
             ))}
           </div>
+          <div className="overflow-x-auto pb-1 scrollbar-hide">
+            <QualityFilter selected={qualityFilter} onSelect={setQualityFilter} />
+          </div>
         </div>
 
         <div className="flex-1 overflow-y-auto">
@@ -158,7 +203,10 @@ export default function Inbox() {
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between gap-1">
-                    <span className={`text-sm font-medium truncate ${unread > 0 ? 'text-white' : 'text-gray-300'}`}>{lead.name}</span>
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span className={`text-sm font-medium truncate ${unread > 0 ? 'text-white' : 'text-gray-300'}`}>{lead.name}</span>
+                      <QualityBadge lead={lead} size="sm" />
+                    </div>
                     <span className="text-muted text-[10px] flex-shrink-0">{formatDistanceToNow(new Date(lead.lastActivity), { locale: es, addSuffix: false })}</span>
                   </div>
                   <div className="flex items-center gap-1 mt-0.5">
@@ -188,7 +236,22 @@ export default function Inbox() {
             <button onClick={() => setSelectedId(null)} className="md:hidden text-muted hover:text-white mr-1">←</button>
             <LeadAvatar lead={selected} size="sm" />
             <div className="flex-1 min-w-0">
-              <div className="text-white font-semibold truncate">{selected.name}</div>
+              <div className="flex items-center gap-2">
+                <span className="text-white font-semibold truncate">{selected.name}</span>
+                <QualityBadge lead={selected} size="md" showLabel />
+                {selected.duplicate_of && (() => {
+                  const original = leads.find(l => l.id === selected.duplicate_of);
+                  return (
+                    <button
+                      onClick={() => original && setSelectedId(original.id)}
+                      title={`Duplicado de ${original?.name ?? 'otro lead'} — click para abrir el original`}
+                      className="text-[10px] bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full hover:bg-amber-200 flex-shrink-0"
+                    >
+                      ⚠ Duplicado de {original?.name ?? '...'}
+                    </button>
+                  );
+                })()}
+              </div>
               <div className="flex items-center gap-2 flex-wrap">
                 <ChannelIcon channel={selected.channel} size="sm" showLabel />
                 {selected.propertyTitle && <span className="text-muted text-xs truncate">{selected.propertyTitle}</span>}
@@ -213,6 +276,33 @@ export default function Inbox() {
             </div>
           </div>
 
+          {/* Selector de etapa pipeline */}
+          {stages.length > 0 && (
+            <div className="flex items-center gap-1.5 px-4 py-2 border-b border-border bg-bg-card overflow-x-auto flex-shrink-0">
+              <span className="text-[10px] uppercase tracking-wider text-muted font-medium mr-1 flex-shrink-0">Etapa:</span>
+              {stages.map(s => {
+                const active = selected.current_stage_key === s.key;
+                return (
+                  <button
+                    key={s.key}
+                    onClick={() => void changeStage(s.key)}
+                    disabled={changingStage}
+                    className={`flex-shrink-0 inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-medium transition-all ${
+                      active
+                        ? 'text-white shadow-sm'
+                        : 'border border-border text-muted hover:bg-bg-hover hover:text-[#0F172A]'
+                    } ${changingStage ? 'opacity-50' : ''}`}
+                    style={active ? { backgroundColor: s.color ?? '#8B1F1F' } : undefined}
+                    title={s.name}
+                  >
+                    <span>{s.icon}</span>
+                    <span>{s.name}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
           {/* Messages */}
           <div className="flex-1 overflow-y-auto p-4 space-y-3">
             {selected.messages.map(msg => (
@@ -227,7 +317,11 @@ export default function Inbox() {
                       {AGENTS.find(a => a.id === msg.agentId)?.name.split(' ')[0]} ·
                     </div>
                   )}
-                  <p className="leading-relaxed">{msg.content}</p>
+                  {msg.media_type && msg.media_url ? (
+                    <MessageMedia message={msg} onOpenLightbox={setLightboxUrl} />
+                  ) : (
+                    <p className="leading-relaxed whitespace-pre-wrap">{msg.content}</p>
+                  )}
                   <div className={`text-[10px] mt-1 ${msg.direction === 'out' ? 'text-white/50' : 'text-muted'}`}>
                     {format(new Date(msg.timestamp), 'HH:mm')}
                   </div>
@@ -247,6 +341,34 @@ export default function Inbox() {
               </div>
             )}
             <div className="flex gap-2 items-end">
+              <TemplatePicker
+                lead={selected}
+                agent={currentUser}
+                onPick={rendered => setReply(prev => prev ? `${prev}\n${rendered}` : rendered)}
+              />
+              <ReplySuggestions
+                lead={selected}
+                agent={currentUser}
+                onPick={text => setReply(text)}
+              />
+              <ClientPortalButton
+                lead={selected}
+                agent={currentUser}
+              />
+              <AttachMediaButton
+                contactId={selected.id}
+                agentId={currentUser.id}
+                channel={channelLabel(selected.channel)}
+                disabled={sending}
+                onSent={() => { void refreshLeads(); }}
+              />
+              <RecordVoiceButton
+                contactId={selected.id}
+                agentId={currentUser.id}
+                channel={channelLabel(selected.channel)}
+                disabled={sending}
+                onSent={() => { void refreshLeads(); }}
+              />
               <textarea
                 value={reply}
                 onChange={e => { setReply(e.target.value); if (sendError) setSendError(null); }}
@@ -306,6 +428,14 @@ export default function Inbox() {
           ))}
         </div>
       </Modal>
+
+      {lightboxUrl && (
+        <div className="fixed inset-0 bg-black z-[60] flex items-center justify-center p-4" onClick={() => setLightboxUrl(null)}>
+          <button onClick={() => setLightboxUrl(null)} className="absolute top-4 right-4 text-white text-2xl z-10">✕</button>
+          <img src={lightboxUrl} alt="" className="max-h-full max-w-full object-contain" onClick={e => e.stopPropagation()} />
+          <a href={lightboxUrl} download target="_blank" rel="noreferrer" className="absolute bottom-4 right-4 bg-white/90 text-black px-3 py-1.5 rounded-lg text-xs hover:bg-white">⬇ Descargar</a>
+        </div>
+      )}
     </div>
   );
 }

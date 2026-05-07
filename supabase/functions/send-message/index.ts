@@ -19,13 +19,28 @@ const cors = {
 };
 
 // ── WhatsApp Cloud API ────────────────────────────────────────────────────────
-async function sendWhatsApp(phone: string, text: string) {
+interface WAMediaArgs { url: string; type: 'image' | 'video' | 'audio' | 'document'; caption?: string; filename?: string }
+
+async function sendWhatsApp(phone: string, text: string, media?: WAMediaArgs) {
   if (!WA_PHONE_NUMBER_ID) return { ok: false, error: 'WHATSAPP_PHONE_NUMBER_ID not set' };
   const to = phone.replace(/\D/g, '');
+
+  let payload: Record<string, unknown>;
+  if (media) {
+    const mediaObj: Record<string, unknown> = { link: media.url };
+    if (media.caption && (media.type === 'image' || media.type === 'video' || media.type === 'document')) {
+      mediaObj.caption = media.caption;
+    }
+    if (media.type === 'document' && media.filename) mediaObj.filename = media.filename;
+    payload = { messaging_product: 'whatsapp', to, type: media.type, [media.type]: mediaObj };
+  } else {
+    payload = { messaging_product: 'whatsapp', to, type: 'text', text: { body: text } };
+  }
+
   const resp = await fetch(`https://graph.facebook.com/v20.0/${WA_PHONE_NUMBER_ID}/messages`, {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${WA_TOKEN}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ messaging_product: 'whatsapp', to, type: 'text', text: { body: text } }),
+    body: JSON.stringify(payload),
   });
   const result = await resp.json();
   if (!resp.ok) {
@@ -36,11 +51,30 @@ async function sendWhatsApp(phone: string, text: string) {
 }
 
 // ── Instagram Graph API ───────────────────────────────────────────────────────
-async function sendInstagram(psid: string, text: string) {
+interface MetaMediaArgs { url: string; type: 'image' | 'video' | 'audio' | 'document' | 'file' }
+
+function buildMessagePayload(text: string, media?: MetaMediaArgs): Record<string, unknown> {
+  if (media) {
+    const igType = media.type === 'document' ? 'file' : media.type;
+    return {
+      attachment: {
+        type: igType,
+        payload: { url: media.url, is_reusable: false },
+      },
+    };
+  }
+  return { text };
+}
+
+async function sendInstagram(psid: string, text: string, media?: MetaMediaArgs) {
   const resp = await fetch(`https://graph.facebook.com/v20.0/${IG_BUSINESS_ID}/messages`, {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${IG_TOKEN}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ recipient: { id: psid }, message: { text }, messaging_type: 'RESPONSE' }),
+    body: JSON.stringify({
+      recipient: { id: psid },
+      message: buildMessagePayload(text, media),
+      messaging_type: 'RESPONSE',
+    }),
   });
   const result = await resp.json();
   if (!resp.ok) return { ok: false, error: JSON.stringify(result) };
@@ -48,11 +82,15 @@ async function sendInstagram(psid: string, text: string) {
 }
 
 // ── Facebook Page Messaging ───────────────────────────────────────────────────
-async function sendFacebook(psid: string, text: string) {
+async function sendFacebook(psid: string, text: string, media?: MetaMediaArgs) {
   const resp = await fetch('https://graph.facebook.com/v20.0/me/messages', {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${FB_TOKEN}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ recipient: { id: psid }, message: { text }, messaging_type: 'RESPONSE' }),
+    body: JSON.stringify({
+      recipient: { id: psid },
+      message: buildMessagePayload(text, media),
+      messaging_type: 'RESPONSE',
+    }),
   });
   const result = await resp.json();
   if (!resp.ok) return { ok: false, error: JSON.stringify(result) };
@@ -148,28 +186,48 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
   if (req.method !== 'POST') return new Response('Method not allowed', { status: 405, headers: cors });
 
-  let body: { contact_id: string; content: string; agent_id?: string };
+  let body: {
+    contact_id: string; content: string; agent_id?: string;
+    media_type?: 'image' | 'video' | 'audio' | 'document';
+    media_url?: string; media_caption?: string; media_mime?: string;
+    media_filename?: string; media_size_bytes?: number;
+  };
   try { body = await req.json(); }
   catch { return new Response(JSON.stringify({ error: 'Invalid JSON' }), { status: 400, headers: cors }); }
 
-  const { contact_id, content, agent_id } = body;
-  if (!contact_id || !content)
+  const { contact_id, content, agent_id, media_type, media_url, media_caption, media_mime, media_filename, media_size_bytes } = body;
+  if (!contact_id || (!content && !media_url))
     return new Response(JSON.stringify({ error: 'Missing fields' }), { status: 400, headers: cors });
+
+  const isMedia = !!(media_type && media_url);
 
   const { data: contact, error: ce } = await supabase
     .from('contacts').select('*').eq('id', contact_id).single();
   if (ce || !contact)
     return new Response(JSON.stringify({ error: 'Contact not found' }), { status: 404, headers: cors });
 
-  // Always save message to DB first
+  // Always save message to DB first (including media metadata)
   const { data: msg, error: me } = await supabase.from('messages').insert({
     contact_id, direction: 'out', content,
     channel: contact.channel, meta_mid: null,
     agent_id: agent_id ?? null, read: true,
+    media_type: media_type ?? null,
+    media_url: media_url ?? null,
+    media_caption: media_caption ?? null,
+    media_mime: media_mime ?? null,
+    media_filename: media_filename ?? null,
+    media_size_bytes: media_size_bytes ?? null,
   }).select().single();
   if (me) return new Response(JSON.stringify({ error: me.message }), { status: 500, headers: cors });
 
   let method = 'none', ok = false, errDetail = '', outsideWindow = false;
+
+  const waMedia: WAMediaArgs | undefined = isMedia
+    ? { url: media_url!, type: media_type!, caption: media_caption, filename: media_filename }
+    : undefined;
+  const metaMedia: MetaMediaArgs | undefined = isMedia
+    ? { url: media_url!, type: media_type as MetaMediaArgs['type'] }
+    : undefined;
 
   // ── WhatsApp ────────────────────────────────────────────────────────────────
   if (contact.channel === 'whatsapp') {
@@ -182,6 +240,17 @@ Deno.serve(async (req) => {
       if (phone) await supabase.from('contacts').update({ phone }).eq('id', contact_id);
     }
 
+    // Si hay media, evitar ManyChat (no soporta media bien) y usar Cloud API directo
+    if (waMedia) {
+      if (!phone || !WA_PHONE_NUMBER_ID) {
+        method = 'failed';
+        errDetail = 'no_phone_for_media';
+      } else {
+        const r = await sendWhatsApp(phone, content, waMedia);
+        if (r.ok) { method = 'whatsapp_cloud'; ok = true; }
+        else { errDetail = r.error ?? ''; outsideWindow = r.outsideWindow ?? false; }
+      }
+    } else
     // WhatsApp: try ManyChat flow (bypasses sendContent Messenger window check), fallback Cloud API
     if (contact.channel_id) {
       const r = await sendManyChatWA(contact.channel_id, content);
@@ -225,38 +294,49 @@ Deno.serve(async (req) => {
     }
 
     if (igPsid) {
-      const r = await sendInstagram(igPsid, content);
+      const r = await sendInstagram(igPsid, content, metaMedia);
       if (r.ok) { method = 'meta_instagram'; ok = true; }
       else {
         errDetail = r.error ?? '';
-        // Fallback: ManyChat
-        if (contact.channel_id) {
+        // Fallback: ManyChat (solo para texto, ManyChat sendContent no soporta attachment.url bien)
+        if (contact.channel_id && !metaMedia) {
           const r2 = await sendManyChat(contact.channel_id, content, 'ig');
           if (r2.ok) { method = 'manychat'; ok = true; }
           else errDetail += ` | mc: ${r2.error}`;
         }
       }
-    } else if (contact.channel_id) {
-      // No PSID resolved: try ManyChat directly
+    } else if (contact.channel_id && !metaMedia) {
+      // No PSID resolved: try ManyChat directly (solo texto)
       const r = await sendManyChat(contact.channel_id, content, 'ig');
       if (r.ok) { method = 'manychat'; ok = true; }
       else { errDetail = `no_psid | mc: ${r.error}`; method = 'failed'; }
+    } else if (metaMedia) {
+      errDetail = 'no_psid_for_media';
+      method = 'failed';
     }
 
   // ── Facebook ────────────────────────────────────────────────────────────────
   } else if (contact.channel === 'facebook' && contact.channel_id) {
-    const r = await sendFacebook(contact.channel_id, content);
+    const r = await sendFacebook(contact.channel_id, content, metaMedia);
     if (r.ok) { method = 'meta_messenger'; ok = true; }
     else {
       errDetail = r.error ?? '';
-      const r2 = await sendManyChat(contact.channel_id, content, 'fb');
-      if (r2.ok) { method = 'manychat'; ok = true; }
-      else errDetail += ` | mc: ${r2.error}`;
+      if (!metaMedia) {
+        const r2 = await sendManyChat(contact.channel_id, content, 'fb');
+        if (r2.ok) { method = 'manychat'; ok = true; }
+        else errDetail += ` | mc: ${r2.error}`;
+      }
     }
   }
 
   if (!ok) method = 'failed';
   console.log(`send-message channel=${contact.channel} method=${method} ok=${ok} err=${errDetail.slice(0, 200)}`);
+
+  // Auto-clasificación de etapa del pipeline (fire-and-forget) — el mensaje del vendedor
+  // también puede mover etapa: "te recibo el sábado" → visita_programada, etc.
+  supabase.functions.invoke('classify-message-stage', {
+    body: { contact_id, message_id: msg.id },
+  }).catch(console.error);
 
   return new Response(JSON.stringify({
     ok: true,

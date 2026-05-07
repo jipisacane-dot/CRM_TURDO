@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { AGENTS } from '../data/mock';
 
 const TurdoLogoFull = () => (
@@ -19,32 +18,39 @@ const TurdoLogoFull = () => (
 );
 
 export default function Login() {
-  const [email, setEmail] = useState('leticia@turdogroup.com');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const navigate = useNavigate();
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
-    if (!email || !password) { setError('Completá todos los campos'); return; }
+    const cleanPassword = password.trim();
+    const cleanEmail = email.trim().toLowerCase();
+    if (!cleanEmail || !cleanPassword) { setError('Completá todos los campos'); return; }
     setLoading(true);
-    await new Promise(r => setTimeout(r, 600));
-    setLoading(false);
-    if (password === 'turdo2024' || password === '1234') {
-      const agent = AGENTS.find(a => a.email.toLowerCase() === email.toLowerCase());
-      const agentId = agent?.id ?? 'leticia';
-      const session = { email, agentId, exp: Date.now() + 8 * 60 * 60 * 1000 };
+    await new Promise(r => setTimeout(r, 400));
+    const validPasswords = ['turdo2024', 'Turdo2024', '1234'];
+    if (validPasswords.includes(cleanPassword)) {
+      const agent = AGENTS.find(a => a.email.toLowerCase() === cleanEmail);
+      if (!agent) {
+        setLoading(false);
+        setError('No encontramos un usuario con ese email. Verificá la dirección.');
+        return;
+      }
+      const session = { email: agent.email, agentId: agent.id, exp: Date.now() + 8 * 60 * 60 * 1000 };
       localStorage.setItem('crm_session', JSON.stringify(session));
-      navigate('/');
+      // Hard reload para que AppContext lea la sesión fresca
+      window.location.href = '/';
     } else {
-      setError('Credenciales incorrectas');
+      setLoading(false);
+      setError(`Contraseña incorrecta. Usá "turdo2024" (sin comillas).`);
     }
   };
 
   return (
-    <div className="min-h-screen bg-bg-main flex items-center justify-center p-4">
+    <div className="min-h-[100dvh] bg-bg-main flex items-center justify-center p-4 safe-top safe-bottom">
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
         <div className="absolute -top-40 -right-40 w-96 h-96 bg-crimson/10 rounded-full blur-3xl" />
         <div className="absolute -bottom-40 -left-40 w-96 h-96 bg-crimson/5 rounded-full blur-3xl" />
@@ -61,8 +67,15 @@ export default function Login() {
                 type="email"
                 value={email}
                 onChange={e => setEmail(e.target.value)}
-                className="w-full bg-bg-input border border-border rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-crimson transition-colors"
+                className="w-full bg-bg-input border border-border rounded-xl px-4 py-3 text-[#0F172A] text-base outline-none focus:border-crimson transition-colors"
                 placeholder="usuario@turdogroup.com"
+                autoFocus
+                autoComplete="username email"
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck={false}
+                inputMode="email"
+                enterKeyHint="next"
               />
             </div>
             <div>
@@ -71,8 +84,10 @@ export default function Login() {
                 type="password"
                 value={password}
                 onChange={e => setPassword(e.target.value)}
-                className="w-full bg-bg-input border border-border rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-crimson transition-colors"
+                className="w-full bg-bg-input border border-border rounded-xl px-4 py-3 text-[#0F172A] text-base outline-none focus:border-crimson transition-colors"
                 placeholder="••••••••"
+                autoComplete="current-password"
+                enterKeyHint="go"
               />
             </div>
 
