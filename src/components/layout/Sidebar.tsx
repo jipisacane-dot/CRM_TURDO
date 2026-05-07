@@ -62,6 +62,7 @@ const NAV_GROUPS: NavGroup[] = [
       { to: '/operations',   iconKey: 'operations', label: 'Operaciones'  },
       { to: '/negotiations', iconKey: 'handshake',  label: 'Negociaciones' },
       { to: '/tasar',        iconKey: 'sparkle',    label: 'Tasación IA'   },
+      { to: '/tasaciones',   iconKey: 'operations', label: 'Historial tasaciones' },
     ],
   },
   {

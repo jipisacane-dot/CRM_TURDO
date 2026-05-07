@@ -28,9 +28,21 @@ Deno.serve(async (req) => {
     });
   }
 
+  // Select explícito: excluye campos internos (calculation_breakdown, client_email, client_phone, agent_id)
   const { data: appraisal, error } = await sb
     .from('appraisals')
-    .select('*')
+    .select(`
+      id, share_token, created_at, updated_at,
+      property_address, barrio, rooms, bedrooms, surface_m2, surface_total_m2,
+      age_years, property_state, has_view, view_type, amenities,
+      expenses_ars, floor_number, exposure, is_furnished, notes,
+      client_name,
+      suggested_price_low_usd, suggested_price_high_usd,
+      comparables, ai_reasoning, market_summary, recommendations,
+      estimated_sale_days, photos, view_count, last_viewed_at,
+      pdf_url, status, sent_at,
+      agent_id
+    `)
     .eq('share_token', token)
     .maybeSingle();
 

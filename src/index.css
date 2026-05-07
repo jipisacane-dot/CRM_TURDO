@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:wght@400;500;600;700&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -98,6 +98,10 @@ main  { background-color: #F8F9FB !important; }
 .bg-crimson .text-white,
 .bg-crimson-bright .text-white   { color: #ffffff !important; }
 
+/* AppraisalPublic — página pública luxury, preservar blanco real (sobre fotos / negro / crimson hex) */
+.appraisal-luxury .text-white,
+.appraisal-luxury .hover\:text-white:hover { color: #ffffff !important; }
+
 /* ── Gray text remapping ──────────────────────────────────── */
 .text-gray-200 { color: #475569 !important; }
 .text-gray-300 { color: #64748B !important; }
@@ -119,8 +123,6 @@ main  { background-color: #F8F9FB !important; }
 /* Momentum scrolling iOS en contenedores */
 .overflow-y-auto, .overflow-x-auto, .overflow-auto {
   -webkit-overflow-scrolling: touch;
-  /* Evita que el scroll del contenedor "rebote" hasta hacer overscroll del body */
-  overscroll-behavior: contain;
 }
 
 /* ── Line clamp ───────────────────────────────────────────── */

@@ -36,11 +36,11 @@ export const AppLayout = ({ children }: { children: ReactNode }) => {
   }
 
   return (
-    <div className="flex min-h-[100dvh] bg-bg-main">
+    <div className="flex h-[100dvh] bg-bg-main overflow-hidden">
       <Sidebar />
       <main
         key={location.pathname}
-        className="flex-1 min-w-0 pb-[calc(5rem+env(safe-area-inset-bottom))] md:pb-0 overflow-y-auto page-fade-enter"
+        className="flex-1 min-w-0 h-full overflow-y-auto pb-[calc(5rem+env(safe-area-inset-bottom))] md:pb-0 page-fade-enter"
       >
         {children}
       </main>

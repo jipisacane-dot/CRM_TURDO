@@ -57,12 +57,17 @@ export default function Appraisals() {
     floor_number: undefined,
     exposure: undefined,
     expenses_ars: undefined,
+    is_furnished: false,
     notes: '',
   });
   const [client, setClient] = useState({ name: '', email: '', phone: '' });
   const [photos, setPhotos] = useState<Array<{ url: string; caption?: string }>>([]);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [result, setResult] = useState<AppraisalResult | null>(null);
+  const [editedLow, setEditedLow] = useState<number>(0);
+  const [editedHigh, setEditedHigh] = useState<number>(0);
+  const [confirmedToken, setConfirmedToken] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [linkCopied, setLinkCopied] = useState(false);
   const photoInputRef = useRef<HTMLInputElement>(null);
@@ -79,11 +84,15 @@ export default function Appraisals() {
   const handlePhotoUpload = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
     setUploadingPhoto(true);
+    setError(null);
     try {
       const newPhotos: typeof photos = [];
+      const failures: string[] = [];
       for (const file of Array.from(files).slice(0, 6 - photos.length)) {
-        if (!file.type.startsWith('image/')) continue;
-        // Comprimir imagen client-side
+        if (!file.type.startsWith('image/')) {
+          failures.push(`${file.name}: no es una imagen válida`);
+          continue;
+        }
         const compressed = await compressImage(file);
         const ext = compressed.type.split('/')[1] ?? 'jpg';
         const path = `appraisals/${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`;
@@ -91,11 +100,17 @@ export default function Appraisals() {
           contentType: compressed.type,
           upsert: false,
         });
-        if (upErr) { console.error(upErr); continue; }
+        if (upErr) {
+          failures.push(`${file.name}: ${upErr.message}`);
+          continue;
+        }
         const { data: pub } = supabase.storage.from('chat-media').getPublicUrl(path);
         newPhotos.push({ url: pub.publicUrl });
       }
-      setPhotos(prev => [...prev, ...newPhotos]);
+      if (newPhotos.length > 0) setPhotos(prev => [...prev, ...newPhotos]);
+      if (failures.length > 0) {
+        setError(`No se pudieron subir ${failures.length} foto(s):\n${failures.join('\n')}`);
+      }
     } finally {
       setUploadingPhoto(false);
     }
@@ -113,7 +128,7 @@ export default function Appraisals() {
     setError(null);
     setStep('loading');
     try {
-      const r = await appraisalsApi.create({
+      const r = await appraisalsApi.preview({
         property,
         client: (client.name || client.phone) ? client : undefined,
         photos,
@@ -124,13 +139,49 @@ export default function Appraisals() {
         throw new Error('La IA no devolvió un resultado válido. Intentá de nuevo.');
       }
       setResult(r);
+      setEditedLow(r.suggested_price_low_usd);
+      setEditedHigh(r.suggested_price_high_usd);
+      setConfirmedToken(null);
       setStep('result');
-      // Scroll al top para que vea el resultado
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (e) {
       console.error('Appraisal error:', e);
       setError(`No se pudo generar la tasación: ${(e as Error).message ?? 'error desconocido'}`);
       setStep('form');
+    }
+  };
+
+  const confirmAppraisal = async () => {
+    if (!result) return;
+    if (!editedLow || !editedHigh || editedLow >= editedHigh) {
+      setError('El precio mínimo debe ser menor que el máximo.');
+      return;
+    }
+    setError(null);
+    setConfirming(true);
+    try {
+      const r = await appraisalsApi.confirm({
+        property,
+        client: (client.name || client.phone) ? client : undefined,
+        photos,
+        agent_id: currentUser.id,
+        agent_email: currentUser.email,
+        suggested_price_low_usd: editedLow,
+        suggested_price_high_usd: editedHigh,
+        ai_suggested_low_usd: result.suggested_price_low_usd,
+        ai_suggested_high_usd: result.suggested_price_high_usd,
+        comparables: result.comparables,
+        ai_reasoning: result.ai_reasoning,
+        calculation_breakdown: result.calculation_breakdown,
+        market_summary: result.market_summary,
+        recommendations: result.recommendations,
+        estimated_sale_days: result.estimated_sale_days,
+      });
+      setConfirmedToken(r.share_token);
+    } catch (e) {
+      setError(`No se pudo guardar la tasación: ${(e as Error).message ?? 'error desconocido'}`);
+    } finally {
+      setConfirming(false);
     }
   };
 
@@ -152,8 +203,8 @@ export default function Appraisals() {
       floor_number: property.floor_number,
       exposure: property.exposure,
       client_name: client.name || null,
-      suggested_price_low_usd: result.suggested_price_low_usd,
-      suggested_price_high_usd: result.suggested_price_high_usd,
+      suggested_price_low_usd: editedLow || result.suggested_price_low_usd,
+      suggested_price_high_usd: editedHigh || result.suggested_price_high_usd,
       comparables: result.comparables,
       ai_reasoning: result.ai_reasoning,
       market_summary: result.market_summary,
@@ -170,6 +221,9 @@ export default function Appraisals() {
   const newAppraisal = () => {
     setStep('form');
     setResult(null);
+    setEditedLow(0);
+    setEditedHigh(0);
+    setConfirmedToken(null);
     setError(null);
   };
 
@@ -199,7 +253,7 @@ export default function Appraisals() {
                   value={property.address}
                   onChange={e => setProperty(p => ({ ...p, address: e.target.value }))}
                   placeholder="Av. Colón 2300, Piso 5° E"
-                  className="input"
+                  className="w-full px-3 py-2.5 border border-border rounded-[10px] text-sm text-[#0F172A] bg-white outline-none focus:border-crimson"
                 />
               </Field>
               <Field label="Barrio / Zona">
@@ -207,7 +261,7 @@ export default function Appraisals() {
                   value={property.barrio ?? ''}
                   onChange={e => setProperty(p => ({ ...p, barrio: e.target.value }))}
                   placeholder="Plaza Mitre"
-                  className="input"
+                  className="w-full px-3 py-2.5 border border-border rounded-[10px] text-sm text-[#0F172A] bg-white outline-none focus:border-crimson"
                 />
               </Field>
             </div>
@@ -218,32 +272,32 @@ export default function Appraisals() {
               <Field label="Ambientes">
                 <input type="number" value={property.rooms ?? ''}
                   onChange={e => setProperty(p => ({ ...p, rooms: e.target.value ? +e.target.value : undefined }))}
-                  className="input" />
+                  className="w-full px-3 py-2.5 border border-border rounded-[10px] text-sm text-[#0F172A] bg-white outline-none focus:border-crimson" />
               </Field>
               <Field label="Dormitorios">
                 <input type="number" value={property.bedrooms ?? ''}
                   onChange={e => setProperty(p => ({ ...p, bedrooms: e.target.value ? +e.target.value : undefined }))}
-                  className="input" />
+                  className="w-full px-3 py-2.5 border border-border rounded-[10px] text-sm text-[#0F172A] bg-white outline-none focus:border-crimson" />
               </Field>
               <Field label="m² cubiertos">
                 <input type="number" value={property.surface_m2 ?? ''}
                   onChange={e => setProperty(p => ({ ...p, surface_m2: e.target.value ? +e.target.value : undefined }))}
-                  className="input" />
+                  className="w-full px-3 py-2.5 border border-border rounded-[10px] text-sm text-[#0F172A] bg-white outline-none focus:border-crimson" />
               </Field>
               <Field label="Antigüedad (años)">
                 <input type="number" value={property.age_years ?? ''}
                   onChange={e => setProperty(p => ({ ...p, age_years: e.target.value ? +e.target.value : undefined }))}
-                  className="input" />
+                  className="w-full px-3 py-2.5 border border-border rounded-[10px] text-sm text-[#0F172A] bg-white outline-none focus:border-crimson" />
               </Field>
               <Field label="Piso">
                 <input type="number" value={property.floor_number ?? ''}
                   onChange={e => setProperty(p => ({ ...p, floor_number: e.target.value ? +e.target.value : undefined }))}
-                  className="input" />
+                  className="w-full px-3 py-2.5 border border-border rounded-[10px] text-sm text-[#0F172A] bg-white outline-none focus:border-crimson" />
               </Field>
               <Field label="Orientación">
                 <select value={property.exposure ?? ''}
                   onChange={e => setProperty(p => ({ ...p, exposure: e.target.value as PropertyInput['exposure'] || undefined }))}
-                  className="input">
+                  className="w-full px-3 py-2.5 border border-border rounded-[10px] text-sm text-[#0F172A] bg-white outline-none focus:border-crimson">
                   {EXPOSURES.map(x => <option key={x.value} value={x.value}>{x.label}</option>)}
                 </select>
               </Field>
@@ -252,7 +306,7 @@ export default function Appraisals() {
               <Field label="Estado">
                 <select value={property.property_state ?? ''}
                   onChange={e => setProperty(p => ({ ...p, property_state: e.target.value as PropertyInput['property_state'] || undefined }))}
-                  className="input">
+                  className="w-full px-3 py-2.5 border border-border rounded-[10px] text-sm text-[#0F172A] bg-white outline-none focus:border-crimson">
                   <option value="">— Seleccionar —</option>
                   {STATES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
                 </select>
@@ -263,16 +317,31 @@ export default function Appraisals() {
                     const v = e.target.value;
                     setProperty(p => ({ ...p, view_type: v as PropertyInput['view_type'] || undefined, has_view: !!v }));
                   }}
-                  className="input">
+                  className="w-full px-3 py-2.5 border border-border rounded-[10px] text-sm text-[#0F172A] bg-white outline-none focus:border-crimson">
                   {VIEWS.map(v => <option key={v.value} value={v.value}>{v.label}</option>)}
                 </select>
               </Field>
               <Field label="Expensas (ARS/mes)">
                 <input type="number" value={property.expenses_ars ?? ''}
                   onChange={e => setProperty(p => ({ ...p, expenses_ars: e.target.value ? +e.target.value : undefined }))}
-                  className="input" />
+                  className="w-full px-3 py-2.5 border border-border rounded-[10px] text-sm text-[#0F172A] bg-white outline-none focus:border-crimson" />
               </Field>
             </div>
+            <div className="mt-3">
+              <label className="flex items-center gap-2 cursor-pointer select-none p-3 bg-bg-soft rounded-lg border border-border hover:border-crimson transition-colors">
+                <input
+                  type="checkbox"
+                  checked={!!property.is_furnished}
+                  onChange={e => setProperty(p => ({ ...p, is_furnished: e.target.checked }))}
+                  className="w-4 h-4 accent-crimson"
+                />
+                <div className="flex-1">
+                  <div className="text-sm font-medium text-[#0F172A]">Vendido amueblado</div>
+                  <div className="text-[11px] text-muted">En reciclados y a estrenar suma 5-10% al precio</div>
+                </div>
+              </label>
+            </div>
+
             <div className="mt-3">
               <label className="text-xs font-medium text-muted block mb-1.5">Amenities</label>
               <div className="flex flex-wrap gap-1.5">
@@ -300,7 +369,7 @@ export default function Appraisals() {
               onChange={e => setProperty(p => ({ ...p, notes: e.target.value }))}
               rows={3}
               placeholder="Detalles relevantes: estado del edificio, mejoras recientes, particularidades, etc."
-              className="input resize-none"
+              className="w-full px-3 py-2.5 border border-border rounded-[10px] text-sm text-[#0F172A] bg-white outline-none focus:border-crimson resize-none"
             />
           </Section>
 
@@ -351,13 +420,13 @@ export default function Appraisals() {
           <Section title="Cliente / propietario (opcional)">
             <div className="grid md:grid-cols-3 gap-3">
               <Field label="Nombre">
-                <input value={client.name} onChange={e => setClient(c => ({ ...c, name: e.target.value }))} className="input" />
+                <input value={client.name} onChange={e => setClient(c => ({ ...c, name: e.target.value }))} className="w-full px-3 py-2.5 border border-border rounded-[10px] text-sm text-[#0F172A] bg-white outline-none focus:border-crimson" />
               </Field>
               <Field label="Teléfono">
-                <input value={client.phone} onChange={e => setClient(c => ({ ...c, phone: e.target.value }))} className="input" inputMode="tel" />
+                <input value={client.phone} onChange={e => setClient(c => ({ ...c, phone: e.target.value }))} className="w-full px-3 py-2.5 border border-border rounded-[10px] text-sm text-[#0F172A] bg-white outline-none focus:border-crimson" inputMode="tel" />
               </Field>
               <Field label="Email">
-                <input value={client.email} onChange={e => setClient(c => ({ ...c, email: e.target.value }))} className="input" inputMode="email" />
+                <input value={client.email} onChange={e => setClient(c => ({ ...c, email: e.target.value }))} className="w-full px-3 py-2.5 border border-border rounded-[10px] text-sm text-[#0F172A] bg-white outline-none focus:border-crimson" inputMode="email" />
               </Field>
             </div>
           </Section>
@@ -392,53 +461,91 @@ export default function Appraisals() {
 
       {step === 'result' && result && (
         <div className="space-y-4">
-          {/* Hero del resultado */}
+          {/* Hero con precio EDITABLE */}
           <div className="bg-gradient-to-br from-crimson to-[#A52828] rounded-2xl p-6 text-white">
-            <div className="text-xs uppercase tracking-wider opacity-80">Precio sugerido</div>
-            <div className="text-3xl md:text-4xl font-bold mt-2 tabular-nums">
-              USD {result.suggested_price_low_usd.toLocaleString('es-AR')} — USD {result.suggested_price_high_usd.toLocaleString('es-AR')}
+            <div className="flex items-baseline justify-between mb-3">
+              <div className="text-xs uppercase tracking-wider opacity-80">Precio sugerido por la IA</div>
+              <div className="text-[10px] uppercase tracking-wider opacity-70">editable</div>
             </div>
+            <div className="flex flex-col md:flex-row md:items-center gap-3">
+              <div className="flex-1">
+                <div className="text-[10px] uppercase tracking-wider opacity-75 mb-1 ml-1">Mínimo (cierre esperado)</div>
+                <div className="flex items-center gap-2 bg-white/10 rounded-xl px-3 py-2">
+                  <span className="text-sm opacity-80">USD</span>
+                  <input
+                    type="number"
+                    value={editedLow || ''}
+                    onChange={e => { setEditedLow(Number(e.target.value) || 0); setConfirmedToken(null); }}
+                    className="bg-transparent text-white text-2xl md:text-3xl font-bold tabular-nums outline-none w-full placeholder-white/40"
+                    placeholder="0"
+                  />
+                </div>
+              </div>
+              <span className="text-2xl opacity-60 text-center md:mt-5">—</span>
+              <div className="flex-1">
+                <div className="text-[10px] uppercase tracking-wider opacity-75 mb-1 ml-1">Máximo (publicación)</div>
+                <div className="flex items-center gap-2 bg-white/10 rounded-xl px-3 py-2">
+                  <span className="text-sm opacity-80">USD</span>
+                  <input
+                    type="number"
+                    value={editedHigh || ''}
+                    onChange={e => { setEditedHigh(Number(e.target.value) || 0); setConfirmedToken(null); }}
+                    className="bg-transparent text-white text-2xl md:text-3xl font-bold tabular-nums outline-none w-full placeholder-white/40"
+                    placeholder="0"
+                  />
+                </div>
+              </div>
+            </div>
+            {editedLow > 0 && editedHigh > 0 && editedLow >= editedHigh && (
+              <div className="mt-3 bg-amber-400/30 border border-amber-300 rounded-lg px-3 py-2 text-sm text-amber-50">
+                ⚠ El precio mínimo (USD {editedLow.toLocaleString('es-AR')}) debe ser MENOR que el máximo (USD {editedHigh.toLocaleString('es-AR')}).
+              </div>
+            )}
             {result.estimated_sale_days > 0 && (
-              <div className="text-sm mt-2 opacity-90">
+              <div className="text-sm mt-3 opacity-90">
                 Tiempo estimado de venta: {result.estimated_sale_days} días
               </div>
             )}
+            <div className="text-[11px] opacity-75 mt-2">
+              Original IA: USD {result.suggested_price_low_usd.toLocaleString('es-AR')} — USD {result.suggested_price_high_usd.toLocaleString('es-AR')}
+            </div>
           </div>
 
-          <div className="bg-white border border-border rounded-2xl p-5">
-            <h3 className="text-sm font-bold text-[#0F172A] uppercase tracking-wider mb-2">Análisis</h3>
-            <p className="text-sm text-[#0F172A] leading-relaxed">{result.ai_reasoning}</p>
-          </div>
-
-          {result.market_summary && (
-            <div className="bg-white border border-border rounded-2xl p-5">
-              <h3 className="text-sm font-bold text-[#0F172A] uppercase tracking-wider mb-2">Mercado</h3>
-              <p className="text-sm text-[#0F172A] leading-relaxed">{result.market_summary}</p>
+          {/* Cálculo del modelo (técnico, para el vendedor) */}
+          {result.calculation_breakdown && (
+            <div className="bg-amber-50 border border-amber-200 rounded-2xl p-5">
+              <h3 className="text-xs font-bold text-amber-900 uppercase tracking-wider mb-2">🧮 Cálculo del modelo (uso interno)</h3>
+              <p className="text-sm text-[#0F172A] leading-relaxed whitespace-pre-line tabular-nums">{result.calculation_breakdown}</p>
             </div>
           )}
 
+          {/* Comparables — ahora con USD/m² y fuente */}
           {result.comparables.length > 0 && (
             <div className="bg-white border border-border rounded-2xl p-5">
-              <h3 className="text-sm font-bold text-[#0F172A] uppercase tracking-wider mb-3">Propiedades comparables ({result.comparables.length})</h3>
+              <h3 className="text-sm font-bold text-[#0F172A] uppercase tracking-wider mb-3">
+                Comparables ({result.comparables.length})
+              </h3>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-border text-xs text-muted uppercase">
+                      <th className="text-left py-2 pr-2">Fuente</th>
                       <th className="text-left py-2">Dirección</th>
                       <th className="text-right py-2">Precio</th>
                       <th className="text-right py-2">m²</th>
-                      <th className="text-right py-2">Amb</th>
-                      <th className="text-left py-2">Estado</th>
+                      <th className="text-right py-2">USD/m²</th>
+                      <th className="text-left py-2 pl-2">Estado</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border">
                     {result.comparables.map((c, i) => (
                       <tr key={i}>
-                        <td className="py-2 text-[#0F172A]">{c.address}</td>
+                        <td className="py-2 pr-2 text-xs text-muted">{c.source ?? '—'}</td>
+                        <td className="py-2 text-[#0F172A] truncate max-w-[200px]">{c.address}</td>
                         <td className="py-2 text-right tabular-nums font-semibold text-crimson">USD {c.price_usd.toLocaleString('es-AR')}</td>
                         <td className="py-2 text-right tabular-nums text-muted">{c.m2}</td>
-                        <td className="py-2 text-right tabular-nums text-muted">{c.rooms ?? '—'}</td>
-                        <td className="py-2 text-muted text-xs">{c.state ?? '—'}</td>
+                        <td className="py-2 text-right tabular-nums text-muted">{c.m2 ? Math.round(c.price_usd / c.m2).toLocaleString('es-AR') : '—'}</td>
+                        <td className="py-2 pl-2 text-muted text-xs">{c.state ?? '—'}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -447,32 +554,60 @@ export default function Appraisals() {
             </div>
           )}
 
-          {result.recommendations.length > 0 && (
-            <div className="bg-violet-50 border border-violet-200 rounded-2xl p-5">
-              <h3 className="text-sm font-bold text-violet-900 uppercase tracking-wider mb-3">Recomendaciones</h3>
-              <ul className="space-y-2">
-                {result.recommendations.map((r, i) => (
-                  <li key={i} className="text-sm text-[#0F172A] flex gap-2">
-                    <span className="text-emerald-500 flex-shrink-0">✓</span>
-                    <span>{r}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
+          {(() => {
+            const high = editedHigh || result.suggested_price_high_usd;
+            const low = editedLow || result.suggested_price_low_usd;
+            const cierre = Math.round((low + high) / 2 / 1000) * 1000;
+            const fromOffer = Math.round((low * 0.95) / 1000) * 1000;
+            const filteredRecs = (result.recommendations ?? []).filter(r => !/USD\s*[\d.,]+|\$\s*[\d.,]+\s*(K|mil)/i.test(r));
+            const priceRecs = [
+              `Publicar en USD ${high.toLocaleString('es-AR')} con margen para negociar cierre en USD ${cierre.toLocaleString('es-AR')}`,
+              `Aceptar ofertas serias desde USD ${fromOffer.toLocaleString('es-AR')} si hay financiación confirmada o cierre rápido`,
+            ];
+            const allRecs = [...priceRecs, ...filteredRecs];
+            return (
+              <div className="bg-violet-50 border border-violet-200 rounded-2xl p-5">
+                <h3 className="text-sm font-bold text-violet-900 uppercase tracking-wider mb-3">Recomendaciones para la venta</h3>
+                <ul className="space-y-2">
+                  {allRecs.map((r, i) => (
+                    <li key={i} className="text-sm text-[#0F172A] flex gap-2">
+                      <span className="text-emerald-500 flex-shrink-0">✓</span>
+                      <span>{r}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            );
+          })()}
 
-          {/* Compartir link público */}
-          {result.share_token && (
+          {error && <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl p-3 text-sm whitespace-pre-line">{error}</div>}
+
+          {/* CONFIRMAR — recién acá se genera el link público */}
+          {!confirmedToken ? (
+            <div className="bg-[#0F172A] text-white rounded-2xl p-5">
+              <h3 className="text-sm font-bold mb-1">Confirmar tasación</h3>
+              <p className="text-xs text-white/70 mb-4">
+                Revisá el precio y, si querés ajustarlo, modificá los valores arriba. Al confirmar se genera el link público para mandarle al cliente y se habilita el PDF.
+              </p>
+              <button
+                onClick={confirmAppraisal}
+                disabled={confirming || !editedLow || !editedHigh || editedLow >= editedHigh}
+                className="w-full bg-emerald-500 hover:bg-emerald-600 text-white py-3 rounded-xl text-sm font-semibold disabled:opacity-50 transition-colors"
+              >
+                {confirming ? 'Guardando…' : '✓ Confirmar y generar link'}
+              </button>
+            </div>
+          ) : (
             <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4">
-              <h3 className="text-sm font-bold text-emerald-900 mb-1">🔗 Link para mandar al cliente</h3>
-              <p className="text-xs text-emerald-800 mb-3">Tasación profesional con fotos, análisis y datos del asesor. Estilo web responsive.</p>
+              <h3 className="text-sm font-bold text-emerald-900 mb-1">🔗 Tasación confirmada — link para el cliente</h3>
+              <p className="text-xs text-emerald-800 mb-3">Tasación profesional con fotos, análisis y datos del asesor.</p>
               <div className="bg-white border border-emerald-200 rounded-xl p-2 mb-2">
-                <code className="text-xs text-[#0F172A] break-all">{`${window.location.origin}/t/${result.share_token}`}</code>
+                <code className="text-xs text-[#0F172A] break-all">{`${window.location.origin}/t/${confirmedToken}`}</code>
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <button
                   onClick={async () => {
-                    const url = `${window.location.origin}/t/${result.share_token}`;
+                    const url = `${window.location.origin}/t/${confirmedToken}`;
                     await navigator.clipboard.writeText(url);
                     setLinkCopied(true);
                     setTimeout(() => setLinkCopied(false), 1500);
@@ -482,7 +617,7 @@ export default function Appraisals() {
                   {linkCopied ? '✓ Copiado' : '📋 Copiar link'}
                 </button>
                 <a
-                  href={`https://api.whatsapp.com/send?text=${encodeURIComponent(`Te paso la tasación profesional de tu propiedad:\n${window.location.origin}/t/${result.share_token}`)}`}
+                  href={`https://api.whatsapp.com/send?text=${encodeURIComponent(`Te paso la tasación profesional de tu propiedad:\n${window.location.origin}/t/${confirmedToken}`)}`}
                   target="_blank"
                   rel="noreferrer"
                   className="bg-emerald-500 hover:bg-emerald-600 text-white py-2 rounded-lg text-sm font-medium text-center"
@@ -494,7 +629,12 @@ export default function Appraisals() {
           )}
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-            <button onClick={downloadPdf} className="bg-crimson hover:bg-crimson-light text-white py-3 rounded-xl font-semibold text-sm">
+            <button
+              onClick={downloadPdf}
+              disabled={!confirmedToken}
+              className="bg-crimson hover:bg-crimson-light text-white py-3 rounded-xl font-semibold text-sm disabled:opacity-40 disabled:cursor-not-allowed"
+              title={!confirmedToken ? 'Confirmá la tasación primero' : ''}
+            >
               📄 Descargar PDF
             </button>
             <button onClick={newAppraisal} className="bg-white border border-border text-[#0F172A] py-3 rounded-xl font-medium text-sm hover:bg-bg-soft">
@@ -504,19 +644,6 @@ export default function Appraisals() {
         </div>
       )}
 
-      <style>{`
-        .input {
-          width: 100%;
-          padding: 0.625rem 0.75rem;
-          border: 1px solid #E2E8F0;
-          border-radius: 0.625rem;
-          font-size: 0.875rem;
-          color: #0F172A;
-          background: white;
-          outline: none;
-        }
-        .input:focus { border-color: #8B1F1F; }
-      `}</style>
     </div>
   );
 }
