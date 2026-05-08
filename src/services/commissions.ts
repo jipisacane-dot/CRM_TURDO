@@ -82,6 +82,7 @@ export interface DBOperation {
   fecha_boleto: string;
   fecha_escritura: string | null;
   fecha_reserva: string | null;
+  fecha_vencimiento_reserva: string | null;
   monto_sena_usd: number | null;
   contact_id: string | null;
   status: OperationStatus;
@@ -94,6 +95,33 @@ export interface DBOperation {
   rejected_reason: string | null;
   paid_at: string | null;
   agency_commission_pct: number;
+  // ── Datos del propietario (dueño que vende) ─────────────────
+  propietario_nombre: string | null;
+  propietario_telefono: string | null;
+  // ── Comisión compartida con otra inmobiliaria ──────────────
+  is_compartida: boolean;
+  inmobiliaria_compartida_nombre: string | null;
+  comision_pct_turdo: number; // 6 default, 3 si compartida (editable)
+  // ── Honorarios calculados / editables por Leti ─────────────
+  honorarios_totales_usd: number | null;
+  honorarios_vendedor_usd: number | null;
+  honorarios_captador_usd: number | null;
+  comision_captador_pct: number; // % del total que cobra captador (cuando ≠ vendedor)
+  // ── Escribanía y gastos ────────────────────────────────────
+  escribania_nombre: string | null;
+  monto_escrituracion_usd: number | null;
+  gastos_escribania_comprador_usd: number | null;
+  gastos_escribania_vendedor_usd: number | null;
+  tasador: string | null;
+  cedula_estado: string | null;
+  // ── Servicios y trámites ───────────────────────────────────
+  osse: string | null;
+  arba: string | null;
+  arm: string | null;
+  camuzzi: string | null;
+  edea: string | null;
+  administracion: string | null;
+  observaciones_extra: string | null;
   created_at: string;
   updated_at: string;
 }

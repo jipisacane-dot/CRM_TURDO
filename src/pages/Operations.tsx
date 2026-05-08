@@ -41,22 +41,53 @@ const STATUS_ORDER: OperationStatus[] = ['reservada', 'boleto', 'escriturada', '
 const todayISO = () => new Date().toISOString().slice(0, 10);
 
 interface NewOpDraft {
+  // Propiedad
   property_id: string;
   newPropCode: string;
   newPropAddress: string;
   newPropPrice: string;
   newPropBarrio: string;
   newPropCoverFile: File | null;
+  // Agentes
   vendedor_id: string;
   captador_id: string;
+  // Contraparte
   contact_id: string;
+  propietario_nombre: string;
+  propietario_telefono: string;
+  // Monto + fechas
   precio_venta_usd: string;
   fecha_reserva: string;
+  fecha_vencimiento_reserva: string;
   monto_sena_usd: string;
   fecha_boleto: string;
   fecha_escritura: string;
   status: OperationStatus;
+  // Comisión
+  is_compartida: boolean;
+  inmobiliaria_compartida_nombre: string;
+  comision_pct_turdo: string;
+  comision_captador_pct: string;
+  honorarios_totales_usd: string;
+  honorarios_vendedor_usd: string;
+  honorarios_captador_usd: string;
+  // Escribanía y gastos
+  escribania_nombre: string;
+  monto_escrituracion_usd: string;
+  gastos_escribania_comprador_usd: string;
+  gastos_escribania_vendedor_usd: string;
+  tasador: string;
+  cedula_estado: string;
+  // Servicios y trámites
+  osse: string;
+  arba: string;
+  arm: string;
+  camuzzi: string;
+  edea: string;
+  administracion: string;
+  // Observaciones
   notes: string;
+  observaciones_extra: string;
 }
 
 const blankDraft = (): NewOpDraft => ({
@@ -69,14 +100,54 @@ const blankDraft = (): NewOpDraft => ({
   vendedor_id: '',
   captador_id: '',
   contact_id: '',
+  propietario_nombre: '',
+  propietario_telefono: '',
   precio_venta_usd: '',
   fecha_reserva: '',
+  fecha_vencimiento_reserva: '',
   monto_sena_usd: '',
   fecha_boleto: todayISO(),
   fecha_escritura: '',
   status: 'boleto',
+  is_compartida: false,
+  inmobiliaria_compartida_nombre: '',
+  comision_pct_turdo: '6',
+  comision_captador_pct: '50',
+  honorarios_totales_usd: '',
+  honorarios_vendedor_usd: '',
+  honorarios_captador_usd: '',
+  escribania_nombre: '',
+  monto_escrituracion_usd: '',
+  gastos_escribania_comprador_usd: '',
+  gastos_escribania_vendedor_usd: '',
+  tasador: '',
+  cedula_estado: '',
+  osse: '',
+  arba: '',
+  arm: '',
+  camuzzi: '',
+  edea: '',
+  administracion: '',
   notes: '',
+  observaciones_extra: '',
 });
+
+// Helper: calcula honorarios totales y splits captador/vendedor automáticamente.
+// Permite override manual (Leti puede tipear los números directos si no quiere que se autocalculen).
+function calcHonorarios(d: Pick<NewOpDraft, 'precio_venta_usd' | 'comision_pct_turdo' | 'comision_captador_pct' | 'vendedor_id' | 'captador_id'>) {
+  const precio = Number(d.precio_venta_usd) || 0;
+  const pct = Number(d.comision_pct_turdo) || 0;
+  const totales = precio * pct / 100;
+  // Si captador != vendedor (y captador no vacío), aplica split
+  const tieneCaptadorDistinto = !!d.captador_id && d.captador_id !== d.vendedor_id;
+  if (tieneCaptadorDistinto) {
+    const captPct = Number(d.comision_captador_pct) || 50;
+    const captador = totales * captPct / 100;
+    const vendedor = totales - captador;
+    return { totales, vendedor, captador };
+  }
+  return { totales, vendedor: totales, captador: 0 };
+}
 
 export default function Operations() {
   const { currentUser } = useApp();
@@ -273,6 +344,9 @@ export default function Operations() {
         }
       }
 
+      // Calcular honorarios automáticos antes de guardar
+      const hon = calcHonorarios(draft);
+      const pctTurdo = Number(draft.comision_pct_turdo) || (draft.is_compartida ? 3 : 6);
       const newOp = await operationsApi.create({
         property_id: propertyId,
         captador_id: draft.captador_id || null,
@@ -281,19 +355,47 @@ export default function Operations() {
         fecha_boleto: draft.fecha_boleto || todayISO(),
         fecha_escritura: draft.fecha_escritura || null,
         fecha_reserva: draft.fecha_reserva || null,
+        fecha_vencimiento_reserva: draft.fecha_vencimiento_reserva || null,
         monto_sena_usd: draft.monto_sena_usd ? Number(draft.monto_sena_usd) : null,
         contact_id: draft.contact_id || null,
         status: draft.status,
         cancelled_at: null,
         cancelled_reason: null,
-        // Auto-aprobado si lo carga el admin, sino queda pendiente
         approval_status: isAdmin ? 'approved' : 'pending',
         approved_by: isAdmin ? (currentUser.id ?? null) : null,
-        approved_at: null, // trigger lo setea
+        approved_at: null,
         rejected_reason: null,
         paid_at: null,
-        agency_commission_pct: 6,
+        agency_commission_pct: pctTurdo,
+        // Propietario
+        propietario_nombre: draft.propietario_nombre || null,
+        propietario_telefono: draft.propietario_telefono || null,
+        // Compartida
+        is_compartida: draft.is_compartida,
+        inmobiliaria_compartida_nombre: draft.is_compartida ? (draft.inmobiliaria_compartida_nombre || null) : null,
+        comision_pct_turdo: pctTurdo,
+        comision_captador_pct: Number(draft.comision_captador_pct) || 50,
+        // Honorarios — usar override manual si llenó, sino auto-calc
+        honorarios_totales_usd: draft.honorarios_totales_usd ? Number(draft.honorarios_totales_usd) : (hon.totales || null),
+        honorarios_vendedor_usd: draft.honorarios_vendedor_usd ? Number(draft.honorarios_vendedor_usd) : (hon.vendedor || null),
+        honorarios_captador_usd: draft.honorarios_captador_usd ? Number(draft.honorarios_captador_usd) : (hon.captador || null),
+        // Escribanía
+        escribania_nombre: draft.escribania_nombre || null,
+        monto_escrituracion_usd: draft.monto_escrituracion_usd ? Number(draft.monto_escrituracion_usd) : null,
+        gastos_escribania_comprador_usd: draft.gastos_escribania_comprador_usd ? Number(draft.gastos_escribania_comprador_usd) : null,
+        gastos_escribania_vendedor_usd: draft.gastos_escribania_vendedor_usd ? Number(draft.gastos_escribania_vendedor_usd) : null,
+        tasador: draft.tasador || null,
+        cedula_estado: draft.cedula_estado || null,
+        // Servicios
+        osse: draft.osse || null,
+        arba: draft.arba || null,
+        arm: draft.arm || null,
+        camuzzi: draft.camuzzi || null,
+        edea: draft.edea || null,
+        administracion: draft.administracion || null,
+        // Notas
         notes: draft.notes || null,
+        observaciones_extra: draft.observaciones_extra || null,
       });
       // Pasar a step 2 (docs) en vez de cerrar
       setCreatedOpId(newOp.id);
@@ -905,8 +1007,144 @@ export default function Operations() {
           </div>
 
           {/* Notas */}
+          {/* ── Propietario (dueño que vende) ────────────────────── */}
+          <details className="bg-white border border-border rounded-xl">
+            <summary className="px-4 py-3 text-sm font-semibold text-[#0F172A] cursor-pointer hover:bg-bg-hover">👤 Propietario (dueño que vende)</summary>
+            <div className="px-4 pb-4 space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-muted block mb-1">Nombre completo</label>
+                  <input value={draft.propietario_nombre} onChange={(e) => setDraft({ ...draft, propietario_nombre: e.target.value })} placeholder="Ej: Pablo Jorge Porta" className="w-full bg-white border border-border rounded-xl px-3 py-2 text-sm text-[#0F172A]" />
+                </div>
+                <div>
+                  <label className="text-xs text-muted block mb-1">Teléfono</label>
+                  <input value={draft.propietario_telefono} onChange={(e) => setDraft({ ...draft, propietario_telefono: e.target.value })} inputMode="tel" className="w-full bg-white border border-border rounded-xl px-3 py-2 text-sm text-[#0F172A]" />
+                </div>
+              </div>
+            </div>
+          </details>
+
+          {/* ── Reserva — vencimiento ────────────────────────────── */}
+          {(draft.status === 'reservada' || draft.fecha_reserva) && (
+            <details className="bg-white border border-border rounded-xl" open>
+              <summary className="px-4 py-3 text-sm font-semibold text-[#0F172A] cursor-pointer hover:bg-bg-hover">⏳ Vencimiento de reserva</summary>
+              <div className="px-4 pb-4">
+                <label className="text-xs text-muted block mb-1">Fecha de vencimiento</label>
+                <input type="date" value={draft.fecha_vencimiento_reserva} onChange={(e) => setDraft({ ...draft, fecha_vencimiento_reserva: e.target.value })} className="w-full bg-white border border-border rounded-xl px-3 py-2 text-sm text-[#0F172A]" />
+                <p className="text-[11px] text-muted mt-1">Leticia recibe alerta 3 días antes del vencimiento.</p>
+              </div>
+            </details>
+          )}
+
+          {/* ── Comisión ────────────────────────────────────────── */}
+          <details className="bg-white border border-border rounded-xl" open>
+            <summary className="px-4 py-3 text-sm font-semibold text-[#0F172A] cursor-pointer hover:bg-bg-hover">💰 Comisión</summary>
+            <div className="px-4 pb-4 space-y-3">
+              <label className="flex items-center gap-2 text-sm cursor-pointer select-none p-2 bg-bg-soft rounded-lg">
+                <input
+                  type="checkbox"
+                  checked={draft.is_compartida}
+                  onChange={(e) => {
+                    const chk = e.target.checked;
+                    setDraft(d => ({ ...d, is_compartida: chk, comision_pct_turdo: chk ? '3' : '6', inmobiliaria_compartida_nombre: chk ? d.inmobiliaria_compartida_nombre : '' }));
+                  }}
+                  className="w-4 h-4 accent-crimson"
+                />
+                <span className="font-medium text-[#0F172A]">Compartida con otra inmobiliaria</span>
+              </label>
+
+              {draft.is_compartida && (
+                <div>
+                  <label className="text-xs text-muted block mb-1">Nombre de la inmobiliaria</label>
+                  <input value={draft.inmobiliaria_compartida_nombre} onChange={(e) => setDraft({ ...draft, inmobiliaria_compartida_nombre: e.target.value })} placeholder="Ej: Bellucci" className="w-full bg-white border border-border rounded-xl px-3 py-2 text-sm text-[#0F172A]" />
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-muted block mb-1">% comisión Turdo</label>
+                  <input type="number" step="0.1" value={draft.comision_pct_turdo} onChange={(e) => setDraft({ ...draft, comision_pct_turdo: e.target.value })} className="w-full bg-white border border-border rounded-xl px-3 py-2 text-sm text-[#0F172A]" />
+                  <p className="text-[10px] text-muted mt-0.5">Default 6% (3% si compartida). Editable para cierres negociados.</p>
+                </div>
+                {draft.captador_id && draft.captador_id !== draft.vendedor_id && (
+                  <div>
+                    <label className="text-xs text-muted block mb-1">% para captador</label>
+                    <input type="number" step="1" value={draft.comision_captador_pct} onChange={(e) => setDraft({ ...draft, comision_captador_pct: e.target.value })} className="w-full bg-white border border-border rounded-xl px-3 py-2 text-sm text-[#0F172A]" />
+                    <p className="text-[10px] text-muted mt-0.5">Resto va al vendedor que cerró. Default 50/50.</p>
+                  </div>
+                )}
+              </div>
+
+              <div className="grid grid-cols-3 gap-2">
+                <div>
+                  <label className="text-[10px] text-muted block mb-1 uppercase tracking-wider">Honorarios totales</label>
+                  <input type="number" placeholder="Auto" value={draft.honorarios_totales_usd} onChange={(e) => setDraft({ ...draft, honorarios_totales_usd: e.target.value })} className="w-full bg-white border border-border rounded-lg px-2 py-1.5 text-sm text-[#0F172A]" />
+                </div>
+                <div>
+                  <label className="text-[10px] text-muted block mb-1 uppercase tracking-wider">Vendedor</label>
+                  <input type="number" placeholder="Auto" value={draft.honorarios_vendedor_usd} onChange={(e) => setDraft({ ...draft, honorarios_vendedor_usd: e.target.value })} className="w-full bg-white border border-border rounded-lg px-2 py-1.5 text-sm text-[#0F172A]" />
+                </div>
+                <div>
+                  <label className="text-[10px] text-muted block mb-1 uppercase tracking-wider">Captador</label>
+                  <input type="number" placeholder="Auto" value={draft.honorarios_captador_usd} onChange={(e) => setDraft({ ...draft, honorarios_captador_usd: e.target.value })} className="w-full bg-white border border-border rounded-lg px-2 py-1.5 text-sm text-[#0F172A]" />
+                </div>
+              </div>
+            </div>
+          </details>
+
+          {/* ── Escribanía y gastos ─────────────────────────────── */}
+          <details className="bg-white border border-border rounded-xl">
+            <summary className="px-4 py-3 text-sm font-semibold text-[#0F172A] cursor-pointer hover:bg-bg-hover">📝 Escribanía y gastos</summary>
+            <div className="px-4 pb-4 space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-muted block mb-1">Escribanía</label>
+                  <input value={draft.escribania_nombre} onChange={(e) => setDraft({ ...draft, escribania_nombre: e.target.value })} className="w-full bg-white border border-border rounded-xl px-3 py-2 text-sm text-[#0F172A]" />
+                </div>
+                <div>
+                  <label className="text-xs text-muted block mb-1">Monto escrituración (USD)</label>
+                  <input type="number" value={draft.monto_escrituracion_usd} onChange={(e) => setDraft({ ...draft, monto_escrituracion_usd: e.target.value })} className="w-full bg-white border border-border rounded-xl px-3 py-2 text-sm text-[#0F172A]" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-muted block mb-1">Gastos escribanía — comprador</label>
+                  <input type="number" value={draft.gastos_escribania_comprador_usd} onChange={(e) => setDraft({ ...draft, gastos_escribania_comprador_usd: e.target.value })} className="w-full bg-white border border-border rounded-xl px-3 py-2 text-sm text-[#0F172A]" />
+                </div>
+                <div>
+                  <label className="text-xs text-muted block mb-1">Gastos escribanía — vendedor</label>
+                  <input type="number" value={draft.gastos_escribania_vendedor_usd} onChange={(e) => setDraft({ ...draft, gastos_escribania_vendedor_usd: e.target.value })} className="w-full bg-white border border-border rounded-xl px-3 py-2 text-sm text-[#0F172A]" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-muted block mb-1">Tasador</label>
+                  <input value={draft.tasador} onChange={(e) => setDraft({ ...draft, tasador: e.target.value })} className="w-full bg-white border border-border rounded-xl px-3 py-2 text-sm text-[#0F172A]" />
+                </div>
+                <div>
+                  <label className="text-xs text-muted block mb-1">Cédula</label>
+                  <input value={draft.cedula_estado} onChange={(e) => setDraft({ ...draft, cedula_estado: e.target.value })} placeholder="Tramitada / Pendiente" className="w-full bg-white border border-border rounded-xl px-3 py-2 text-sm text-[#0F172A]" />
+                </div>
+              </div>
+            </div>
+          </details>
+
+          {/* ── Servicios y trámites ────────────────────────────── */}
+          <details className="bg-white border border-border rounded-xl">
+            <summary className="px-4 py-3 text-sm font-semibold text-[#0F172A] cursor-pointer hover:bg-bg-hover">💡 Servicios y trámites</summary>
+            <div className="px-4 pb-4 grid grid-cols-2 gap-3">
+              <div><label className="text-xs text-muted block mb-1">OSSE (agua)</label><input value={draft.osse} onChange={(e) => setDraft({ ...draft, osse: e.target.value })} className="w-full bg-white border border-border rounded-xl px-3 py-2 text-sm text-[#0F172A]" /></div>
+              <div><label className="text-xs text-muted block mb-1">ARBA</label><input value={draft.arba} onChange={(e) => setDraft({ ...draft, arba: e.target.value })} className="w-full bg-white border border-border rounded-xl px-3 py-2 text-sm text-[#0F172A]" /></div>
+              <div><label className="text-xs text-muted block mb-1">ARM</label><input value={draft.arm} onChange={(e) => setDraft({ ...draft, arm: e.target.value })} className="w-full bg-white border border-border rounded-xl px-3 py-2 text-sm text-[#0F172A]" /></div>
+              <div><label className="text-xs text-muted block mb-1">Camuzzi (gas)</label><input value={draft.camuzzi} onChange={(e) => setDraft({ ...draft, camuzzi: e.target.value })} className="w-full bg-white border border-border rounded-xl px-3 py-2 text-sm text-[#0F172A]" /></div>
+              <div><label className="text-xs text-muted block mb-1">EDEA (luz)</label><input value={draft.edea} onChange={(e) => setDraft({ ...draft, edea: e.target.value })} className="w-full bg-white border border-border rounded-xl px-3 py-2 text-sm text-[#0F172A]" /></div>
+              <div><label className="text-xs text-muted block mb-1">Administración (consorcio)</label><input value={draft.administracion} onChange={(e) => setDraft({ ...draft, administracion: e.target.value })} className="w-full bg-white border border-border rounded-xl px-3 py-2 text-sm text-[#0F172A]" /></div>
+            </div>
+          </details>
+
+          {/* Notas */}
           <div>
-            <label className="text-sm font-medium text-[#0F172A] mb-1.5 block">Notas (opcional)</label>
+            <label className="text-sm font-medium text-[#0F172A] mb-1.5 block">Notas internas</label>
             <input
               value={draft.notes}
               onChange={(e) => setDraft({ ...draft, notes: e.target.value })}
@@ -915,19 +1153,43 @@ export default function Operations() {
             />
           </div>
 
-          {/* Preview comisiones */}
+          <div>
+            <label className="text-sm font-medium text-[#0F172A] mb-1.5 block">Observaciones extra</label>
+            <textarea
+              value={draft.observaciones_extra}
+              onChange={(e) => setDraft({ ...draft, observaciones_extra: e.target.value })}
+              rows={2}
+              placeholder="Detalles adicionales del trámite..."
+              className="w-full bg-white border border-border rounded-xl px-3 py-2 text-sm text-[#0F172A] resize-none"
+            />
+          </div>
+
+          {/* Preview comisiones DINÁMICO */}
           {draft.precio_venta_usd && Number(draft.precio_venta_usd) > 0 && draft.status !== 'reservada' && (() => {
-            const precio = Number(draft.precio_venta_usd);
-            const turdo = precio * 0.06;
+            const hon = calcHonorarios(draft);
+            const tieneCaptador = !!draft.captador_id && draft.captador_id !== draft.vendedor_id;
+            const pct = Number(draft.comision_pct_turdo) || 6;
             return (
               <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-sm">
-                <div className="font-medium text-emerald-800 mb-1">Comisiones (al aprobarse):</div>
+                <div className="font-medium text-emerald-800 mb-1">
+                  Comisiones {draft.is_compartida && <span className="text-xs font-normal">(compartida con {draft.inmobiliaria_compartida_nombre || 'otra inmobiliaria'})</span>}
+                </div>
                 <div className="text-emerald-700 space-y-0.5">
-                  <div>Turdo (6%): <span className="font-semibold">{fmtUSD(turdo)}</span></div>
-                  <div className="text-xs">Vendedor (escalonado según orden de venta del mes):</div>
-                  <div className="text-xs ml-3">· Si es 1ra del mes (20%): {fmtUSD(turdo * 0.20)}</div>
-                  <div className="text-xs ml-3">· Si es 2da (25%): {fmtUSD(turdo * 0.25)}</div>
-                  <div className="text-xs ml-3">· Si es 3ra+ (30%): {fmtUSD(turdo * 0.30)}</div>
+                  <div>Turdo ({pct}%): <span className="font-semibold">{fmtUSD(hon.totales)}</span></div>
+                  {tieneCaptador ? (
+                    <>
+                      <div className="text-xs">· Captador ({draft.comision_captador_pct}%): <span className="font-semibold">{fmtUSD(hon.captador)}</span></div>
+                      <div className="text-xs">· Vendedor ({100 - Number(draft.comision_captador_pct)}%): <span className="font-semibold">{fmtUSD(hon.vendedor)}</span></div>
+                      <div className="text-[11px] text-emerald-600 mt-1">Después se aplica el escalonado (20/25/30%) sobre cada parte.</div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="text-xs">Vendedor (escalonado según orden de venta del mes):</div>
+                      <div className="text-xs ml-3">· 1ra del mes (20%): {fmtUSD(hon.totales * 0.20)}</div>
+                      <div className="text-xs ml-3">· 2da (25%): {fmtUSD(hon.totales * 0.25)}</div>
+                      <div className="text-xs ml-3">· 3ra+ (30%): {fmtUSD(hon.totales * 0.30)}</div>
+                    </>
+                  )}
                 </div>
               </div>
             );
