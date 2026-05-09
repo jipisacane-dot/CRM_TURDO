@@ -146,7 +146,7 @@ export const Sidebar = () => {
         <TurdoLogo />
       </div>
 
-      <nav className="flex-1 px-3 py-4 space-y-4 overflow-y-auto">
+      <nav className="flex-1 min-h-0 px-3 py-4 space-y-4 overflow-y-auto">
         {visibleGroups.map((group) => (
           <div key={group.label}>
             <div className="px-3 mb-1.5 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
