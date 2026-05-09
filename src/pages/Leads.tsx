@@ -24,14 +24,15 @@ export default function Leads() {
   const isAdmin = currentUser.role === 'admin';
 
   const filtered = useMemo(() => {
-    const scope = isAdmin ? leads : leads.filter(l => l.assignedTo === currentUser.id);
+    // Vendedores filtran por currentUser.dbId (UUID real), NO por currentUser.id (mock string)
+    const scope = isAdmin ? leads : leads.filter(l => currentUser.dbId && l.assignedTo === currentUser.dbId);
     return scope
       .filter(l => statusFilter === 'all' || l.status === statusFilter)
       .filter(l => branchFilter === 'all' || l.branch === branchFilter)
       .filter(l => !isAdmin || agentFilter === 'all' || l.assignedTo === agentFilter)
       .filter(l => !search || l.name.toLowerCase().includes(search.toLowerCase()) || (l.propertyTitle ?? '').toLowerCase().includes(search.toLowerCase()) || (l.phone ?? '').includes(search) || (l.email ?? '').includes(search))
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-  }, [leads, isAdmin, currentUser.id, search, statusFilter, branchFilter, agentFilter]);
+  }, [leads, isAdmin, currentUser.dbId, search, statusFilter, branchFilter, agentFilter]);
 
   return (
     <div className="p-5 md:p-8 space-y-5">

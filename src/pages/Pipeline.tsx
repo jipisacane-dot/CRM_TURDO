@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useApp } from '../contexts/AppContext';
 import { useNavigate } from 'react-router-dom';
 import { pipelineStagesApi, pipelineApi, type PipelineStage } from '../services/pipeline';
@@ -25,6 +25,29 @@ export default function Pipeline() {
   const [overStage, setOverStage] = useState<string | null>(null);
   const [updating, setUpdating] = useState<string | null>(null);
 
+  // Drag-to-scroll horizontal: click + arrastrar en el fondo del kanban (no sobre tarjetas)
+  const kanbanRef = useRef<HTMLDivElement>(null);
+  const panState = useRef<{ panning: boolean; startX: number; startScroll: number }>({ panning: false, startX: 0, startScroll: 0 });
+  const [isPanning, setIsPanning] = useState(false);
+
+  const onPanStart = (e: React.MouseEvent) => {
+    // Si el click es sobre una tarjeta (draggable=true), no activamos pan — dejamos drag&drop
+    const target = e.target as HTMLElement;
+    if (target.closest('[draggable="true"]')) return;
+    if (!kanbanRef.current) return;
+    panState.current = { panning: true, startX: e.clientX, startScroll: kanbanRef.current.scrollLeft };
+    setIsPanning(true);
+  };
+  const onPanMove = (e: React.MouseEvent) => {
+    if (!panState.current.panning || !kanbanRef.current) return;
+    const dx = e.clientX - panState.current.startX;
+    kanbanRef.current.scrollLeft = panState.current.startScroll - dx;
+  };
+  const onPanEnd = () => {
+    panState.current.panning = false;
+    setIsPanning(false);
+  };
+
   useEffect(() => {
     void Promise.all([pipelineStagesApi.list(), agentsApi.list()]).then(([s, a]) => {
       setStages(s);
@@ -39,7 +62,8 @@ export default function Pipeline() {
 
   const myLeads = useMemo(() => {
     const scope = (leads as ContactWithStage[]).filter(l => {
-      if (!isAdmin && l.assignedTo !== currentUser.id) return false;
+      // Vendedores: comparar contra currentUser.dbId (UUID real), NO contra currentUser.id (mock string)
+      if (!isAdmin && (!currentUser.dbId || l.assignedTo !== currentUser.dbId)) return false;
       if (isAdmin && filterAgent !== 'all') {
         if (filterAgent === '_unassigned' && l.assignedTo) return false;
         if (filterAgent !== '_unassigned' && l.assignedTo !== filterAgent) return false;
@@ -47,7 +71,7 @@ export default function Pipeline() {
       return true;
     });
     return scope;
-  }, [leads, isAdmin, currentUser.id, filterAgent]);
+  }, [leads, isAdmin, currentUser.dbId, filterAgent]);
 
   const leadsByStage = useMemo(() => {
     const map = new Map<string, ContactWithStage[]>();
@@ -127,8 +151,16 @@ export default function Pipeline() {
         })}
       </div>
 
-      {/* Kanban */}
-      <div className="overflow-x-auto pb-2">
+      {/* Kanban — drag-to-scroll horizontal con click en el fondo */}
+      <div
+        ref={kanbanRef}
+        className="overflow-x-auto pb-2 select-none"
+        style={{ cursor: isPanning ? 'grabbing' : 'grab' }}
+        onMouseDown={onPanStart}
+        onMouseMove={onPanMove}
+        onMouseUp={onPanEnd}
+        onMouseLeave={onPanEnd}
+      >
         <div className="flex gap-3 min-w-max">
           {stages.map(s => {
             const items = leadsByStage.get(s.key) ?? [];

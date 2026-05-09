@@ -56,7 +56,7 @@ interface SendResult {
 }
 
 interface AppContextType {
-  currentUser: Agent;
+  currentUser: Agent & { dbId: string | null };
   leads: Lead[];
   loading: boolean;
   refreshLeads: () => Promise<void>;
@@ -84,14 +84,34 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [loading, setLoading] = useState(true);
   const [dueReminders, setDueReminders] = useState<DBReminder[]>([]);
-  const currentUser = AGENTS.find(a => a.id === getSessionAgentId()) ?? AGENTS[0];
+  const baseUser = AGENTS.find(a => a.id === getSessionAgentId()) ?? AGENTS[0];
+  // dbId = UUID real del agent en Supabase (resuelto via email).
+  // Es lo que se usa para filtros que comparan contra contacts.assigned_to (UUID en DB).
+  const [agentDbId, setAgentDbId] = useState<string | null>(null);
+  const currentUser = { ...baseUser, dbId: agentDbId };
+
+  // Resolver UUID real del agent al iniciar sesión (cache en localStorage para evitar lookup constante)
+  useEffect(() => {
+    if (!baseUser.email) return;
+    const cacheKey = `agent_dbid_${baseUser.email}`;
+    const cached = localStorage.getItem(cacheKey);
+    if (cached) { setAgentDbId(cached); return; }
+    supabase.from('agents').select('id').eq('email', baseUser.email).maybeSingle().then(({ data }) => {
+      if (data?.id) {
+        setAgentDbId(data.id);
+        localStorage.setItem(cacheKey, data.id);
+      }
+    });
+  }, [baseUser.email]);
 
   const refreshLeads = useCallback(async () => {
+    // Si es vendedor pero todavía no resolvimos su dbId, esperar.
+    if (baseUser.role === 'agent' && !agentDbId) return;
     setLoading(true);
     try {
-      // Vendedores solo ven sus contactos asignados (filtro server-side).
+      // Vendedores solo ven sus contactos asignados (filtro server-side por UUID real).
       // Admin (Leticia) ve todo.
-      const opts = currentUser.role === 'agent' ? { agentId: currentUser.id } : undefined;
+      const opts = baseUser.role === 'agent' && agentDbId ? { agentId: agentDbId } : undefined;
       const contacts = await db.contacts.listWithMessages(opts);
       setLeads(contacts.map(c => toLead(c, c.messages)));
     } catch (e) {
@@ -99,7 +119,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     } finally {
       setLoading(false);
     }
-  }, [currentUser.id, currentUser.role]);
+  }, [agentDbId, baseUser.role]);
 
   const refreshReminders = useCallback(async () => {
     try {

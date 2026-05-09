@@ -82,7 +82,9 @@ export default function Inbox() {
   };
 
   const isAdmin = currentUser.role === 'admin';
-  const scope = isAdmin ? leads : leads.filter(l => l.assignedTo === currentUser.id);
+  // Vendedores filtran por currentUser.dbId (UUID real de DB), NO por currentUser.id (mock string del login).
+  // Si dbId todavía no resolvió, lista vacía (evita mostrar leads de otros agentes brevemente).
+  const scope = isAdmin ? leads : leads.filter(l => currentUser.dbId && l.assignedTo === currentUser.dbId);
 
   const filtered = scope
     .filter(l => channelFilter === 'all' || l.channel === channelFilter)

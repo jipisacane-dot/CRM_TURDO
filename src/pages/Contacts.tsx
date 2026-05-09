@@ -53,7 +53,8 @@ export default function Contacts() {
   const fileRef = useRef<HTMLInputElement>(null);
 
   const isAdmin = currentUser.role === 'admin';
-  const scope = isAdmin ? leads : leads.filter(l => l.assignedTo === currentUser.id);
+  // Vendedores filtran por currentUser.dbId (UUID real), NO por currentUser.id (mock string)
+  const scope = isAdmin ? leads : leads.filter(l => currentUser.dbId && l.assignedTo === currentUser.dbId);
 
   const filtered = scope
     .filter(l => statusFilter === 'all' || l.status === statusFilter)
