@@ -90,8 +90,10 @@ export default function AttachMediaButton({ contactId, agentId, channel, onSent,
       });
       if (upErr) throw upErr;
       setProgress(60);
-      const { data: pub } = supabase.storage.from('chat-media').getPublicUrl(path);
-      const mediaUrl = pub.publicUrl;
+      // Signed URL temporal (1h) para que Meta descargue el archivo y lo envíe al cliente.
+      const { data: signed } = await supabase.storage.from('chat-media').createSignedUrl(path, 3600);
+      const mediaUrl = signed?.signedUrl;
+      if (!mediaUrl) throw new Error('No se pudo generar URL de entrega');
       setProgress(75);
 
       const { data, error } = await supabase.functions.invoke('send-message', {
@@ -101,6 +103,7 @@ export default function AttachMediaButton({ contactId, agentId, channel, onSent,
           agent_id: agentId,
           media_type: preview.type,
           media_url: mediaUrl,
+          media_path: path,
           media_caption: caption.trim() || undefined,
           media_mime: preview.file.type,
           media_filename: preview.file.name,
