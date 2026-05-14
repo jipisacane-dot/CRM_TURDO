@@ -39,7 +39,7 @@ const PropertyCard = ({ prop, onClick }: { prop: CRMProperty; onClick: () => voi
       {/* Cover photo */}
       <div className="h-40 bg-gradient-to-br from-bg-input to-bg-hover flex items-center justify-center relative overflow-hidden">
         {prop.coverPhoto ? (
-          <img src={prop.coverPhoto} alt={prop.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+          <img src={prop.coverPhoto} alt={prop.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" loading="lazy" decoding="async" />
         ) : (
           <span className="text-5xl opacity-20">🏠</span>
         )}
@@ -276,7 +276,7 @@ export default function Properties() {
             {selected.photos.length > 0 && (
               <div className="flex gap-2 overflow-x-auto pb-1">
                 {selected.photos.slice(0, 6).map((ph, i) => (
-                  <img key={i} src={ph} alt="" className="h-32 w-48 object-cover rounded-xl flex-shrink-0" />
+                  <img key={i} src={ph} alt="" className="h-32 w-48 object-cover rounded-xl flex-shrink-0" loading="lazy" decoding="async" />
                 ))}
               </div>
             )}
