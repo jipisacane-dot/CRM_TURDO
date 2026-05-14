@@ -10,6 +10,9 @@ const Inbox = lazy(() => import('./pages/Inbox'));
 const Contacts = lazy(() => import('./pages/Contacts'));
 const Leads = lazy(() => import('./pages/Leads'));
 const Properties = lazy(() => import('./pages/Properties'));
+const MyProperties = lazy(() => import('./pages/MyProperties'));
+const PropertyPublic = lazy(() => import('./pages/PropertyPublic'));
+const ScriptQueue = lazy(() => import('./pages/ScriptQueue'));
 const Team = lazy(() => import('./pages/Team'));
 const Calendar = lazy(() => import('./pages/Calendar'));
 const Analytics = lazy(() => import('./pages/Analytics'));
@@ -57,11 +60,14 @@ export default function App() {
               <Route path="/preview/portal" element={<ClientPortalPreview />} />
               <Route path="/c/:token" element={<ClientPortal />} />
               <Route path="/t/:token" element={<AppraisalPublic />} />
+              <Route path="/p/:slug" element={<PropertyPublic />} />
               <Route path="/"            element={<AppLayout><Dashboard /></AppLayout>} />
               <Route path="/inbox"       element={<AppLayout><Inbox /></AppLayout>} />
               <Route path="/contacts"    element={<AppLayout><Contacts /></AppLayout>} />
               <Route path="/leads"       element={<AppLayout><Leads /></AppLayout>} />
               <Route path="/properties"  element={<AppLayout><Properties /></AppLayout>} />
+              <Route path="/mis-propiedades" element={<AppLayout><MyProperties /></AppLayout>} />
+              <Route path="/cola-guiones" element={<AppLayout><ScriptQueue /></AppLayout>} />
               <Route path="/operations"  element={<AppLayout><Operations /></AppLayout>} />
               <Route path="/negotiations" element={<AppLayout><Negotiations /></AppLayout>} />
               <Route path="/pipeline"    element={<AppLayout><Pipeline /></AppLayout>} />
