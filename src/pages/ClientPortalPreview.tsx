@@ -79,7 +79,7 @@ export default function ClientPortalPreview() {
       {/* Hero foto + precio */}
       <div className="max-w-2xl mx-auto px-4">
         <div className="relative cursor-pointer rounded-2xl overflow-hidden" onClick={() => setShowLightbox(true)}>
-          <img src={property.photos[activePhoto]} alt={property.title} className="w-full aspect-[16/10] object-cover" />
+          <img src={property.photos[activePhoto]} alt={property.title} className="w-full aspect-[16/10] object-cover" loading="lazy" decoding="async" />
           <div className="absolute bottom-3 right-3 bg-black/60 text-white text-xs px-2.5 py-1 rounded-full backdrop-blur-sm">
             {activePhoto + 1} / {property.photos.length} · ver galería
           </div>
@@ -93,7 +93,7 @@ export default function ClientPortalPreview() {
               onClick={() => setActivePhoto(i)}
               className={`aspect-square rounded-lg overflow-hidden border-2 transition-all ${i === activePhoto ? 'border-[#8B1F1F]' : 'border-transparent opacity-70'}`}
             >
-              <img src={p} alt="" className="w-full h-full object-cover" />
+              <img src={p} alt="" className="w-full h-full object-cover" loading="lazy" decoding="async" />
             </button>
           ))}
         </div>
@@ -284,7 +284,7 @@ export default function ClientPortalPreview() {
       {showLightbox && (
         <div className="fixed inset-0 bg-black z-50 flex items-center justify-center p-4" onClick={() => setShowLightbox(false)}>
           <button onClick={() => setShowLightbox(false)} className="absolute top-4 right-4 text-white text-2xl">✕</button>
-          <img src={property.photos[activePhoto]} alt="" className="max-h-full max-w-full object-contain" />
+          <img src={property.photos[activePhoto]} alt="" className="max-h-full max-w-full object-contain" loading="lazy" decoding="async" />
           <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-2">
             {property.photos.map((_, i) => (
               <button key={i} onClick={e => { e.stopPropagation(); setActivePhoto(i); }} className={`w-2 h-2 rounded-full ${i === activePhoto ? 'bg-white' : 'bg-white/40'}`} />

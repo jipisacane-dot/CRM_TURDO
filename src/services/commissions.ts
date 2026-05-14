@@ -230,12 +230,12 @@ export const propertiesApi = {
   },
   async uploadCoverPhoto(propertyId: string, file: File): Promise<string> {
     const cleanName = file.name.replace(/[^a-zA-Z0-9.\-_]/g, '_');
-    const filePath = `properties/${propertyId}/cover_${Date.now()}_${cleanName}`;
+    const filePath = `${propertyId}/cover_${Date.now()}_${cleanName}`;
     const { error: upErr } = await supabase.storage
-      .from('operation-docs')
+      .from('property-photos')
       .upload(filePath, file, { cacheControl: '3600', upsert: false });
     if (upErr) throw upErr;
-    const { data } = supabase.storage.from('operation-docs').getPublicUrl(filePath);
+    const { data } = supabase.storage.from('property-photos').getPublicUrl(filePath);
     const url = data.publicUrl;
     const { error } = await supabase.from('properties').update({ cover_photo_url: url }).eq('id', propertyId);
     if (error) throw error;
@@ -703,8 +703,11 @@ export const documentsApi = {
     return data;
   },
   async getPublicUrl(filePath: string): Promise<string> {
-    const { data } = supabase.storage.from('operation-docs').getPublicUrl(filePath);
-    return data.publicUrl;
+    const { data, error } = await supabase.storage
+      .from('operation-docs')
+      .createSignedUrl(filePath, 3600);
+    if (error) throw error;
+    return data.signedUrl;
   },
   async remove(doc: DBDocument): Promise<void> {
     await supabase.storage.from('operation-docs').remove([doc.file_path]);

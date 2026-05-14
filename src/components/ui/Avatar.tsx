@@ -18,9 +18,10 @@ export const Avatar = ({ initials, imageUrl, size = 'md', online }: Props) => {
   return (
     <div className="relative inline-flex">
       {imageUrl ? (
-        <img
-          src={imageUrl}
+        <img src={imageUrl}
           alt={initials}
+          loading="lazy"
+          decoding="async"
           className={`${dim} rounded-full object-cover flex-shrink-0`}
           onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
         />
