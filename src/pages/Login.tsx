@@ -22,41 +22,58 @@ export default function Login() {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [debug, setDebug] = useState<string[]>([]);
+
+  const log = (msg: string) => {
+    console.log('[Login DEBUG]', msg);
+    setDebug(prev => [...prev, `${new Date().toISOString().slice(11,19)} ${msg}`]);
+  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    log('handleLogin disparado');
     setError('');
     const cleanPassword = password.trim();
     const cleanEmail = email.trim().toLowerCase();
-    if (!cleanEmail || !cleanPassword) { setError('Completá todos los campos'); return; }
-    setLoading(true);
-
-    // Login real contra Supabase Auth.
-    // La password universal hoy es "turdo2024". Si vienen con la legacy "1234",
-    // la mapeamos antes de mandar para no romper el muscle memory del equipo.
-    const passwordToSend = cleanPassword === '1234' ? 'turdo2024' : cleanPassword;
-    const { data, error: authErr } = await supabase.auth.signInWithPassword({
-      email: cleanEmail,
-      password: passwordToSend,
-    });
-
-    if (authErr || !data.session) {
-      setLoading(false);
-      const msg = authErr?.message ?? 'Error desconocido';
-      if (msg.toLowerCase().includes('invalid')) {
-        setError('Email o contraseña incorrectos.');
-      } else if (msg.toLowerCase().includes('email not confirmed')) {
-        setError('Tu cuenta no está confirmada. Avisá al admin.');
-      } else {
-        setError(msg);
-      }
+    log(`email=${cleanEmail || '(vacío)'} pwd_len=${cleanPassword.length}`);
+    if (!cleanEmail || !cleanPassword) {
+      setError('Completá todos los campos');
+      log('campos vacíos, abort');
       return;
     }
+    setLoading(true);
 
-    // Limpiar sesión vieja del sistema legacy
-    localStorage.removeItem('crm_session');
-    // Hard reload para que AppContext lea la sesión nueva de supabase-js
-    window.location.href = '/';
+    const passwordToSend = cleanPassword === '1234' ? 'turdo2024' : cleanPassword;
+    log('llamando supabase.auth.signInWithPassword...');
+    try {
+      const { data, error: authErr } = await supabase.auth.signInWithPassword({
+        email: cleanEmail,
+        password: passwordToSend,
+      });
+      log(`respuesta: session=${!!data?.session} error=${authErr?.message ?? 'none'}`);
+
+      if (authErr || !data.session) {
+        setLoading(false);
+        const msg = authErr?.message ?? 'Error desconocido';
+        if (msg.toLowerCase().includes('invalid')) {
+          setError('Email o contraseña incorrectos.');
+        } else if (msg.toLowerCase().includes('email not confirmed')) {
+          setError('Tu cuenta no está confirmada. Avisá al admin.');
+        } else {
+          setError(msg);
+        }
+        return;
+      }
+
+      log('login OK, redirigiendo a /');
+      localStorage.removeItem('crm_session');
+      window.location.href = '/';
+    } catch (ex) {
+      const m = ex instanceof Error ? ex.message : String(ex);
+      log(`EXCEPTION: ${m}`);
+      setError(`Excepción: ${m}`);
+      setLoading(false);
+    }
   };
 
   return (
@@ -115,6 +132,15 @@ export default function Login() {
               {loading ? 'Ingresando...' : 'Ingresar al CRM'}
             </button>
           </form>
+
+          {debug.length > 0 && (
+            <div className="mt-4 bg-slate-900 border border-slate-700 rounded-lg p-3 text-[11px] font-mono text-emerald-300 max-h-40 overflow-y-auto">
+              <div className="text-slate-400 mb-1">Debug ({debug.length} eventos):</div>
+              {debug.map((d, i) => (
+                <div key={i}>{d}</div>
+              ))}
+            </div>
+          )}
 
           <div className="mt-6 pt-6 border-t border-border text-center text-muted text-xs">
             ¿Olvidaste tu contraseña? Contactá al administrador
