@@ -6,6 +6,30 @@ const supabase = createClient(
 );
 
 const VERIFY_TOKEN = Deno.env.get('IG_WEBHOOK_VERIFY_TOKEN') ?? 'turdo_crm_verify_2026';
+const META_APP_SECRET = Deno.env.get('META_APP_SECRET') ?? '';
+
+async function verifyMetaSignature(req: Request, rawBody: string): Promise<boolean> {
+  if (!META_APP_SECRET) {
+    console.warn('META_APP_SECRET no configurado — saltando verificación HMAC');
+    return true;
+  }
+  const sigHeader = req.headers.get('x-hub-signature-256');
+  if (!sigHeader?.startsWith('sha256=')) return false;
+  const expected = sigHeader.slice(7);
+  const key = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(META_APP_SECRET),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign']
+  );
+  const sigBuf = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(rawBody));
+  const computed = Array.from(new Uint8Array(sigBuf)).map(b => b.toString(16).padStart(2, '0')).join('');
+  if (computed.length !== expected.length) return false;
+  let diff = 0;
+  for (let i = 0; i < computed.length; i++) diff |= computed.charCodeAt(i) ^ expected.charCodeAt(i);
+  return diff === 0;
+}
 
 interface IGAttachment {
   type?: string;
@@ -14,7 +38,7 @@ interface IGAttachment {
 
 // Descarga URL pública (sin auth, las URLs de IG attachments son temp signed URLs accesibles)
 // y sube al bucket chat-media. Retorna URL pública del bucket.
-async function storeFromUrl(url: string, contactId: string, msgId: string, kind: string): Promise<{ url: string; size: number; mime: string } | null> {
+async function storeFromUrl(url: string, contactId: string, msgId: string, kind: string): Promise<{ url: string; path: string; size: number; mime: string } | null> {
   try {
     const resp = await fetch(url);
     if (!resp.ok) return null;
@@ -30,8 +54,8 @@ async function storeFromUrl(url: string, contactId: string, msgId: string, kind:
       console.error('IG storage upload err', up.error);
       return null;
     }
-    const { data: pub } = supabase.storage.from('chat-media').getPublicUrl(path);
-    return { url: pub.publicUrl, size: buffer.length, mime };
+    const { data: signed } = await supabase.storage.from('chat-media').createSignedUrl(path, 365 * 24 * 3600);
+    return { url: signed?.signedUrl ?? '', path, size: buffer.length, mime };
   } catch (e) {
     console.error('storeFromUrl err', e);
     return null;
@@ -56,9 +80,16 @@ Deno.serve(async (req) => {
     return new Response('Method not allowed', { status: 405 });
   }
 
+  const rawBody = await req.text();
+  const sigOk = await verifyMetaSignature(req, rawBody);
+  if (!sigOk) {
+    console.warn('IG webhook: firma HMAC inválida, rechazando');
+    return new Response('Invalid signature', { status: 403 });
+  }
+
   let body: Record<string, unknown>;
   try {
-    body = await req.json();
+    body = JSON.parse(rawBody);
   } catch {
     return new Response('Invalid JSON', { status: 400 });
   }
@@ -80,26 +111,25 @@ Deno.serve(async (req) => {
       if (!senderId || message?.is_echo) continue;
       if (!text && attachments.length === 0) continue;
 
-      const { data: contact, error: contactError } = await supabase
-        .from('contacts')
-        .upsert(
-          {
-            channel_id: senderId,
-            channel: 'instagram',
-            name: 'Sin nombre',
-            status: 'new',
-            branch: 'Sucursal Centro',
-            updated_at: new Date().toISOString(),
-          },
-          { onConflict: 'channel_id,channel', ignoreDuplicates: false }
-        )
-        .select()
-        .single();
+      // Lookup-then-insert: si el mismo humano ya escribió por otro canal,
+      // reutilizamos su contact_id (matchea por phone normalizado o email,
+      // pero como IG no nos da phone/email del usuario, solo matchea por
+      // channel_id de IG).
+      const { data: contactIdRpc, error: contactError } = await supabase.rpc('find_or_create_contact', {
+        p_channel: 'instagram',
+        p_channel_id: senderId,
+        p_name: 'Sin nombre',
+        p_phone: null,
+        p_email: null,
+        p_avatar_url: null,
+        p_branch: 'Sucursal Centro',
+      });
 
-      if (contactError) {
-        console.error('Contact upsert error:', contactError);
+      if (contactError || !contactIdRpc) {
+        console.error('find_or_create_contact err:', contactError);
         continue;
       }
+      const contact = { id: contactIdRpc as string };
 
       const metaMid = (message?.mid as string) ?? `ig_${senderId}_${Date.now()}`;
 
@@ -124,6 +154,7 @@ Deno.serve(async (req) => {
         const stored = await storeFromUrl(firstAttachment.payload.url, contact.id, metaMid, kind);
         if (stored) {
           msgRecord.media_url = stored.url;
+          msgRecord.media_path = stored.path;
           msgRecord.media_size_bytes = stored.size;
           msgRecord.media_mime = stored.mime;
         }
