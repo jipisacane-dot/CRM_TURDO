@@ -1,4 +1,4 @@
-export type Channel = 'whatsapp' | 'instagram' | 'facebook' | 'email' | 'web' | 'zonaprop' | 'argenprop' | 'mercadolibre';
+export type Channel = 'whatsapp' | 'instagram' | 'facebook' | 'email' | 'web' | 'zonaprop' | 'argenprop' | 'mercadolibre' | 'walk-in';
 export type LeadStatus = 'new' | 'contacted' | 'qualified' | 'proposal' | 'visit' | 'won' | 'lost';
 export type Branch = 'Corrientes' | 'Alem';
 export type PropertyType = 'Departamento' | 'Casa' | 'Terreno' | 'Local' | 'Oficina' | 'PH';

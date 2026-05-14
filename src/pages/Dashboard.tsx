@@ -78,6 +78,7 @@ const CHANNEL_COLORS: Record<Channel, string> = {
   whatsapp: '#25D366', instagram: '#E1306C', facebook: '#1877F2',
   email: '#EA4335', web: '#8B8B8B', zonaprop: '#F5A623',
   argenprop: '#4CAF50', mercadolibre: '#FFE600',
+  'walk-in': '#C2410C',
 };
 
 export default function Dashboard() {
