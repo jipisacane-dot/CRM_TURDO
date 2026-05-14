@@ -10,7 +10,7 @@ import { formatDistanceToNow } from 'date-fns';
 import { es } from 'date-fns/locale';
 
 const STATUSES: (LeadStatus | 'all')[] = ['all', 'new', 'contacted', 'qualified', 'proposal', 'visit', 'won', 'lost'];
-const BRANCHES: (Branch | 'all')[] = ['all', 'Sucursal Centro', 'Sucursal Norte'];
+const BRANCHES: (Branch | 'all')[] = ['all', 'Corrientes', 'Alem'];
 
 export default function Leads() {
   const { leads, assignLead, updateLeadStatus, currentUser } = useApp();

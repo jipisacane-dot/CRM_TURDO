@@ -101,7 +101,7 @@ export default function Contacts() {
         notes: notes || null,
         channel: 'web',
         status: 'new',
-        branch: 'Sucursal Centro',
+        branch: 'Corrientes',
       });
       if (error) errors++; else ok++;
     }

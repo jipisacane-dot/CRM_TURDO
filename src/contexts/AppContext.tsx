@@ -35,7 +35,7 @@ const toLead = (c: DBContact & { current_stage_key?: string | null; stage_change
   propertyTitle: c.property_title ?? undefined,
   status: (c.status as Lead['status']) ?? 'new',
   assignedTo: c.assigned_to ?? undefined,
-  branch: (c.branch as Lead['branch']) ?? 'Sucursal Centro',
+  branch: (c.branch as Lead['branch']) ?? 'Corrientes',
   createdAt: c.created_at,
   lastActivity: messages.length > 0 ? messages[messages.length - 1].created_at : c.created_at,
   messages: toMessages(messages, c.channel),
