@@ -39,6 +39,7 @@ export interface DBMessage {
   created_at: string;
   media_type?: string | null;
   media_url?: string | null;
+  media_path?: string | null;
   media_caption?: string | null;
   media_mime?: string | null;
   media_filename?: string | null;
@@ -82,14 +83,27 @@ export const db = {
       const contactList = (contacts ?? []) as DBContact[];
       if (contactList.length === 0) return [];
 
-      // Solo traer mensajes de esos contactos (no toda la tabla)
+      // Notas críticas:
+      //   1. .in('contact_id', [387 UUIDs]) genera URL > 14KB → PostgREST HTTP 400.
+      //      Solo usamos .in() cuando hay pocos contactos (vendedor).
+      //   2. Supabase tiene HARD LIMIT 1000 rows por query (no se puede superar
+      //      con .range()). Ordenamos DESC para traer los 1000 mensajes MÁS
+      //      RECIENTES y los revertimos en cliente. Los chats activos quedan
+      //      completos; solo se pierden mensajes muy viejos (>1000 mensajes
+      //      atrás), que en la UI raramente importan.
       const ids = contactList.map(c => c.id);
-      const { data: messages, error: me } = await supabase
+      let messagesQuery = supabase
         .from('messages')
         .select('*')
-        .in('contact_id', ids)
-        .order('created_at', { ascending: true });
+        .order('created_at', { ascending: false })
+        .limit(1000);
+      if (ids.length <= 100) {
+        messagesQuery = messagesQuery.in('contact_id', ids);
+      }
+      const { data: messagesDesc, error: me } = await messagesQuery;
       if (me) throw me;
+      // Revertir para que el orden quede ascendente (más viejo arriba, reciente abajo).
+      const messages = ((messagesDesc ?? []) as DBMessage[]).reverse();
 
       const msgByContact = new Map<string, DBMessage[]>();
       for (const m of (messages ?? []) as DBMessage[]) {
@@ -134,13 +148,16 @@ export const db = {
 
   messages: {
     async forContact(contactId: string): Promise<DBMessage[]> {
+      // Limit 1000 es el cap duro de PostgREST. Si un chat tiene >1000 mensajes
+      // (improbable, pero), traemos los 1000 más recientes y revertimos.
       const { data, error } = await supabase
         .from('messages')
         .select('*')
         .eq('contact_id', contactId)
-        .order('created_at', { ascending: true });
+        .order('created_at', { ascending: false })
+        .limit(1000);
       if (error) throw error;
-      return data ?? [];
+      return ((data ?? []) as DBMessage[]).reverse();
     },
 
     async insert(msg: Omit<DBMessage, 'id' | 'created_at'>): Promise<DBMessage> {
