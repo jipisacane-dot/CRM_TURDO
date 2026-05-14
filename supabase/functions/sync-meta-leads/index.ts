@@ -148,7 +148,8 @@ async function syncForm(form: FormConfig): Promise<{ inserted: number; skipped: 
         f.extras,
       ].filter(Boolean).join('\n');
 
-      const { error } = await sb.from('contacts').insert({
+      // Insertar contact y obtener el id para el message sintético
+      const { data: inserted_contact, error } = await sb.from('contacts').insert({
         name: f.name,
         phone: f.phone || null,
         email: emailNorm || null,
@@ -160,18 +161,28 @@ async function syncForm(form: FormConfig): Promise<{ inserted: number; skipped: 
         property_title: propertyTitle,
         notes: notesBlock,
         branch: form.default_branch,
-      });
+      }).select('id').single();
+
       if (error) {
         if (error.code === '23505') {
-          // Unique constraint violation: channel_id+channel ya existe. Esto pasa si
-          // el mismo lead viene en una segunda corrida (debería estar filtrado por
-          // last_synced_at pero por las dudas).
+          // Unique constraint violation: channel_id+channel ya existe
           skipped++;
         } else {
           console.warn('insert fail', error);
           errored++;
         }
-      } else {
+      } else if (inserted_contact) {
+        // Insertar message sintético para que el chat no aparezca vacío
+        // (el lead completó form, no escribió por chat — pero el vendedor
+        // necesita ver el contenido del form cuando abre el chat).
+        await sb.from('messages').insert({
+          contact_id: inserted_contact.id,
+          direction: 'in',
+          content: notesBlock,
+          channel: 'facebook',
+          read: false,
+          created_at: lead.created_time,
+        });
         inserted++;
       }
     }
