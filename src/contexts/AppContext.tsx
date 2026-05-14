@@ -17,6 +17,7 @@ const toMessages = (rows: DBMessage[], channel: string): Lead['messages'] =>
     read: m.read,
     media_type: (m.media_type as Lead['messages'][number]['media_type']) ?? null,
     media_url: m.media_url ?? null,
+    media_path: m.media_path ?? null,
     media_caption: m.media_caption ?? null,
     media_mime: m.media_mime ?? null,
     media_filename: m.media_filename ?? null,
@@ -60,6 +61,7 @@ interface AppContextType {
   leads: Lead[];
   loading: boolean;
   refreshLeads: () => Promise<void>;
+  loadLeadMessages: (leadId: string) => Promise<void>;
   assignLead: (leadId: string, agentId: string) => Promise<void>;
   updateLeadStatus: (leadId: string, status: Lead['status']) => Promise<void>;
   sendMessage: (leadId: string, content: string) => Promise<SendResult>;
@@ -72,23 +74,43 @@ interface AppContextType {
 
 const AppContext = createContext<AppContextType | null>(null);
 
-function getSessionAgentId(): string {
-  try {
-    const raw = localStorage.getItem('crm_session');
-    if (!raw) return 'leticia';
-    return (JSON.parse(raw) as { agentId?: string }).agentId ?? 'leticia';
-  } catch { return 'leticia'; }
+// Determina el agente actual a partir del email de la sesión Supabase Auth.
+// Si todavía no hay sesión, devuelve el primer agente del mock como placeholder
+// (LoginGate redirecciona a /login antes de que esto importe en producción).
+function resolveBaseUser(authEmail: string | null) {
+  if (authEmail) {
+    const fromAuth = AGENTS.find(a => a.email.toLowerCase() === authEmail.toLowerCase());
+    if (fromAuth) return fromAuth;
+  }
+  return AGENTS[0];
 }
 
 export const AppProvider = ({ children }: { children: ReactNode }) => {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [loading, setLoading] = useState(true);
   const [dueReminders, setDueReminders] = useState<DBReminder[]>([]);
-  const baseUser = AGENTS.find(a => a.id === getSessionAgentId()) ?? AGENTS[0];
+  const [authEmail, setAuthEmail] = useState<string | null>(null);
+  const [sessionLoaded, setSessionLoaded] = useState(false);
+  const baseUser = resolveBaseUser(authEmail);
   // dbId = UUID real del agent en Supabase (resuelto via email).
   // Es lo que se usa para filtros que comparan contra contacts.assigned_to (UUID en DB).
   const [agentDbId, setAgentDbId] = useState<string | null>(null);
   const currentUser = { ...baseUser, dbId: agentDbId };
+
+  // Leer sesión Supabase Auth al montar y suscribirse a cambios.
+  // sessionLoaded gate evita race condition: queries esperan al JWT antes de correr
+  // (sino corren con anon_key y RLS devuelve [] silenciosamente).
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => {
+      setAuthEmail(data.session?.user?.email ?? null);
+      setSessionLoaded(true);
+    });
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+      setAuthEmail(session?.user?.email ?? null);
+      setSessionLoaded(true);
+    });
+    return () => { sub.subscription.unsubscribe(); };
+  }, []);
 
   // Resolver UUID real del agent al iniciar sesión (cache en localStorage para evitar lookup constante)
   useEffect(() => {
@@ -105,6 +127,9 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   }, [baseUser.email]);
 
   const refreshLeads = useCallback(async () => {
+    // Esperar a que la sesión Supabase Auth esté cargada — sino la query
+    // corre con anon_key y RLS devuelve [] silenciosamente.
+    if (!sessionLoaded) return;
     // Si es vendedor pero todavía no resolvimos su dbId, esperar.
     if (baseUser.role === 'agent' && !agentDbId) return;
     setLoading(true);
@@ -119,9 +144,30 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     } finally {
       setLoading(false);
     }
-  }, [agentDbId, baseUser.role]);
+  }, [sessionLoaded, agentDbId, baseUser.role]);
+
+  // Trae los mensajes completos de un lead específico (1 query targeted).
+  // Garantiza que el chat abierto siempre tiene todos los mensajes,
+  // sin importar cuánto crezca la tabla messages global.
+  const loadLeadMessages = useCallback(async (leadId: string) => {
+    if (!sessionLoaded) return;
+    try {
+      const msgs = await db.messages.forContact(leadId);
+      setLeads(prev => prev.map(l => {
+        if (l.id !== leadId) return l;
+        return {
+          ...l,
+          messages: toMessages(msgs, l.channel),
+          lastActivity: msgs.length > 0 ? msgs[msgs.length - 1].created_at : l.lastActivity,
+        };
+      }));
+    } catch (e) {
+      console.error('Error cargando mensajes del lead:', leadId, e);
+    }
+  }, [sessionLoaded]);
 
   const refreshReminders = useCallback(async () => {
+    if (!sessionLoaded) return;
     try {
       const due = await db.reminders.listDue();
       setDueReminders(prev => {
@@ -144,7 +190,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     } catch (e) {
       console.error('Error cargando recordatorios:', e);
     }
-  }, []);
+  }, [sessionLoaded]);
 
   const createReminder = async (contactId: string, title: string, dueAt: string, note?: string) => {
     await db.reminders.create({
@@ -283,9 +329,9 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   );
 
   const value = useMemo<AppContextType>(() => ({
-    currentUser, leads, loading, refreshLeads, assignLead, updateLeadStatus,
+    currentUser, leads, loading, refreshLeads, loadLeadMessages, assignLead, updateLeadStatus,
     sendMessage, unreadCount, dueReminders, createReminder, completeReminder, refreshReminders,
-  }), [currentUser, leads, loading, refreshLeads, unreadCount, dueReminders, refreshReminders]);
+  }), [currentUser, leads, loading, refreshLeads, loadLeadMessages, unreadCount, dueReminders, refreshReminders]);
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 };
