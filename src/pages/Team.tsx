@@ -81,7 +81,7 @@ export default function Team() {
   const filtered = agents.filter(a => branchFilter === 'all' || a.branch === branchFilter);
 
   const summaryByBranch = useMemo(() => {
-    return ['Sucursal Centro', 'Sucursal Norte'].map(branch => {
+    return ['Corrientes', 'Alem'].map(branch => {
       const branchAgents = agents.filter(a => a.branch === branch);
       return {
         branch,
@@ -133,10 +133,10 @@ export default function Team() {
       {/* Filter */}
       <div className="flex gap-3">
         <div className="flex bg-bg-card border border-border rounded-xl overflow-hidden">
-          {(['all', 'Sucursal Centro', 'Sucursal Norte'] as const).map(b => (
+          {(['all', 'Corrientes', 'Alem'] as const).map(b => (
             <button key={b} onClick={() => setBranchFilter(b)}
               className={`px-4 py-2.5 text-sm transition-all ${branchFilter === b ? 'bg-crimson text-white' : 'text-muted hover:text-white'}`}>
-              {b === 'all' ? 'Todas' : b.replace('Sucursal ', '')}
+              {b === 'all' ? 'Todas' : b}
             </button>
           ))}
         </div>

@@ -130,7 +130,10 @@ export default function RecordVoiceButton({ contactId, agentId, channel, onSent,
         upsert: false,
       });
       if (upErr) throw upErr;
-      const { data: pub } = supabase.storage.from('chat-media').getPublicUrl(path);
+      // Signed URL temporal (1h) para que Meta pueda descargar el archivo y mandárselo al cliente.
+      const { data: signed } = await supabase.storage.from('chat-media').createSignedUrl(path, 3600);
+      const deliveryUrl = signed?.signedUrl;
+      if (!deliveryUrl) throw new Error('No se pudo generar URL de entrega');
 
       const { data, error } = await supabase.functions.invoke('send-message', {
         body: {
@@ -138,7 +141,8 @@ export default function RecordVoiceButton({ contactId, agentId, channel, onSent,
           content: caption.trim() || '[audio]',
           agent_id: agentId,
           media_type: 'audio',
-          media_url: pub.publicUrl,
+          media_url: deliveryUrl,
+          media_path: path,
           media_caption: caption.trim() || undefined,
           media_mime: file.type,
           media_filename: filename,

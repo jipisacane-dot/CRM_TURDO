@@ -172,7 +172,7 @@ export default function ClientPortal() {
           <div className="max-w-2xl mx-auto px-4">
             {photos.length > 0 ? (
               <div className="relative cursor-pointer rounded-2xl overflow-hidden bg-slate-100" onClick={() => { setShowLightbox(true); track(token!, 'photo_open', { property_id: property.id, idx: activePhotoIdx }); }}>
-                <img src={photos[activePhotoIdx]} alt="" className="w-full aspect-[16/10] object-cover" />
+                <img src={photos[activePhotoIdx]} alt="" className="w-full aspect-[16/10] object-cover" loading="lazy" decoding="async" />
                 {photos.length > 1 && (
                   <div className="absolute bottom-3 right-3 bg-black/60 text-white text-xs px-2.5 py-1 rounded-full">
                     {activePhotoIdx + 1} / {photos.length}
@@ -255,7 +255,7 @@ export default function ClientPortal() {
           <div className="text-xs uppercase tracking-wider text-slate-500 mb-2">Tu asesor</div>
           <div className="flex items-center gap-3">
             {data.agent?.avatar_url ? (
-              <img src={data.agent.avatar_url} className="w-14 h-14 rounded-full object-cover flex-shrink-0" alt="" />
+              <img src={data.agent.avatar_url} className="w-14 h-14 rounded-full object-cover flex-shrink-0" alt="" loading="lazy" decoding="async" />
             ) : (
               <div className="w-14 h-14 rounded-full bg-[#8B1F1F] text-white flex items-center justify-center font-bold text-xl flex-shrink-0">
                 {agentFirstName.charAt(0)}
@@ -386,7 +386,7 @@ export default function ClientPortal() {
       {showLightbox && photos.length > 0 && (
         <div className="fixed inset-0 bg-black z-50 flex items-center justify-center p-4" onClick={() => setShowLightbox(false)}>
           <button onClick={() => setShowLightbox(false)} className="absolute top-4 right-4 text-white text-2xl">✕</button>
-          <img src={photos[activePhotoIdx]} alt="" className="max-h-full max-w-full object-contain" />
+          <img src={photos[activePhotoIdx]} alt="" className="max-h-full max-w-full object-contain" loading="lazy" decoding="async" />
         </div>
       )}
     </div>

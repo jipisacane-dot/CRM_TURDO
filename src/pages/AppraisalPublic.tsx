@@ -148,7 +148,7 @@ export default function AppraisalPublic() {
       {/* ── HERO ──────────────────────────────────────────────────── */}
       {photos.length > 0 ? (
         <div className="relative h-[55vh] md:h-[70vh] overflow-hidden bg-[#1A1A1A]">
-          <img src={photos[0].url} alt="" className="w-full h-full object-cover" />
+          <img src={photos[0].url} alt="" className="w-full h-full object-cover" loading="lazy" decoding="async" />
           {/* Doble overlay: gradient + scrim sólido inferior para garantizar contraste del título */}
           <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/60 to-black/20" />
           <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 to-transparent h-[55%]" />
@@ -242,7 +242,7 @@ export default function AppraisalPublic() {
                   onClick={() => { setActivePhoto(i); setLightbox(true); }}
                   className={`relative overflow-hidden bg-[#E8E2D8] hover:opacity-90 transition-opacity ${i === 0 && photos.length >= 3 ? 'col-span-3 aspect-[16/8]' : 'aspect-square'}`}
                 >
-                  <img src={p.url} alt="" className="w-full h-full object-cover" />
+                  <img src={p.url} alt="" className="w-full h-full object-cover" loading="lazy" decoding="async" />
                 </button>
               ))}
             </div>
@@ -396,7 +396,7 @@ export default function AppraisalPublic() {
                 </div>
                 <div className="flex items-center gap-5 mb-5">
                   {agent.avatar_url ? (
-                    <img src={agent.avatar_url} className="w-20 h-20 rounded-full object-cover flex-shrink-0 border-2 border-[#C9A961]" alt="" />
+                    <img src={agent.avatar_url} className="w-20 h-20 rounded-full object-cover flex-shrink-0 border-2 border-[#C9A961]" alt="" loading="lazy" decoding="async" />
                   ) : (
                     <div
                       style={SERIF}
@@ -487,9 +487,10 @@ export default function AppraisalPublic() {
               </div>
             </>
           )}
-          <img
-            src={photos[activePhoto].url}
+          <img src={photos[activePhoto].url}
             alt=""
+            loading="lazy"
+            decoding="async"
             className="max-h-full max-w-full object-contain"
             onClick={(e) => e.stopPropagation()}
           />

@@ -386,7 +386,7 @@ export default function Appraisals() {
               <div className="grid grid-cols-3 md:grid-cols-6 gap-2 mb-2">
                 {photos.map((p, i) => (
                   <div key={i} className="relative aspect-square rounded-lg overflow-hidden bg-bg-soft group">
-                    <img src={p.url} alt="" className="w-full h-full object-cover" />
+                    <img src={p.url} alt="" className="w-full h-full object-cover" loading="lazy" decoding="async" />
                     <button
                       onClick={() => removePhoto(i)}
                       className="absolute top-1 right-1 bg-black/60 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition-opacity"

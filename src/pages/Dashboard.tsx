@@ -1,9 +1,9 @@
-import { useMemo } from 'react';
+import { lazy, Suspense, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import {
-  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell,
-} from 'recharts';
 import { useApp } from '../contexts/AppContext';
+
+// Charts cargan después del first paint para no bloquear con recharts (120 KB gzip)
+const DashboardCharts = lazy(() => import('../components/dashboard/DashboardCharts'));
 import { AGENTS, PROPERTIES } from '../data/mock';
 import { StatusBadge } from '../components/ui/StatusBadge';
 import { ChannelIcon } from '../components/ui/ChannelIcon';
@@ -78,6 +78,7 @@ const CHANNEL_COLORS: Record<Channel, string> = {
   whatsapp: '#25D366', instagram: '#E1306C', facebook: '#1877F2',
   email: '#EA4335', web: '#8B8B8B', zonaprop: '#F5A623',
   argenprop: '#4CAF50', mercadolibre: '#FFE600',
+  'walk-in': '#C2410C',
 };
 
 export default function Dashboard() {
@@ -324,33 +325,15 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Charts */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div className="bg-bg-card border border-border rounded-2xl p-5">
-          <h3 className="text-white font-semibold mb-4">Consultas por vendedor</h3>
-          <ResponsiveContainer width="100%" height={200}>
-            <BarChart data={agentData} barGap={2}>
-              <XAxis dataKey="name" tick={{ fill: '#666', fontSize: 11 }} axisLine={false} tickLine={false} />
-              <YAxis tick={{ fill: '#666', fontSize: 11 }} axisLine={false} tickLine={false} />
-              <Tooltip contentStyle={{ background: '#FFFFFF', border: '1px solid #E5E7EB', borderRadius: 8, color: '#111827' }} />
-              <Bar dataKey="total" fill="#8B1F1F" radius={4} name="Total" />
-              <Bar dataKey="won" fill="#22C55E" radius={4} name="Ganados" />
-            </BarChart>
-          </ResponsiveContainer>
+      {/* Charts — lazy para evitar cargar recharts en first paint */}
+      <Suspense fallback={
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="bg-bg-card border border-border rounded-2xl p-5 h-[260px] animate-pulse" />
+          <div className="bg-bg-card border border-border rounded-2xl p-5 h-[260px] animate-pulse" />
         </div>
-
-        <div className="bg-bg-card border border-border rounded-2xl p-5">
-          <h3 className="text-white font-semibold mb-4">Canales de entrada</h3>
-          <ResponsiveContainer width="100%" height={200}>
-            <PieChart>
-              <Pie data={channelData} dataKey="count" nameKey="channel" cx="50%" cy="50%" outerRadius={75} label={(entry: { name?: string; percent?: number }) => `${entry.name ?? ''} ${((entry.percent ?? 0) * 100).toFixed(0)}%`} labelLine={false} fontSize={10}>
-                {channelData.map((entry, i) => <Cell key={i} fill={entry.fill} />)}
-              </Pie>
-              <Tooltip contentStyle={{ background: '#FFFFFF', border: '1px solid #E5E7EB', borderRadius: 8, color: '#111827' }} />
-            </PieChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
+      }>
+        <DashboardCharts agentData={agentData} channelData={channelData} />
+      </Suspense>
 
       {/* Recent leads + top properties */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">

@@ -11,6 +11,7 @@ import ReplySuggestions from '../components/ReplySuggestions';
 import ClientPortalButton from '../components/ClientPortalButton';
 import AttachMediaButton from '../components/AttachMediaButton';
 import RecordVoiceButton from '../components/RecordVoiceButton';
+import MergeContactsModal from '../components/MergeContactsModal';
 import QualityBadge, { QualityFilter } from '../components/ui/QualityBadge';
 import MessageMedia from '../components/ui/MessageMedia';
 import { pipelineStagesApi, pipelineApi, type PipelineStage } from '../services/pipeline';
@@ -41,13 +42,14 @@ function LeadAvatar({ lead, size = 'md' }: { lead: Lead; size?: 'sm' | 'md' }) {
 const ALL_CHANNELS: (Channel | 'all')[] = ['all', 'whatsapp', 'instagram', 'facebook', 'email', 'web', 'zonaprop', 'argenprop'];
 
 export default function Inbox() {
-  const { leads, assignLead, sendMessage, loading, dueReminders, completeReminder, currentUser, refreshLeads } = useApp();
+  const { leads, assignLead, sendMessage, loading, dueReminders, completeReminder, currentUser, refreshLeads, loadLeadMessages } = useApp();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [channelFilter, setChannelFilter] = useState<Channel | 'all'>('all');
   const [qualityFilter, setQualityFilter] = useState<'all' | 'hot' | 'warm' | 'cold' | 'unrated'>('all');
   const [reply, setReply] = useState('');
   const [showAssign, setShowAssign] = useState(false);
   const [showReminder, setShowReminder] = useState(false);
+  const [showMerge, setShowMerge] = useState(false);
   const [search, setSearch] = useState('');
   const [sendError, setSendError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
@@ -66,6 +68,13 @@ export default function Inbox() {
     const leadId = params.get('lead');
     if (leadId) setSelectedId(leadId);
   }, []);
+
+  // Cuando se selecciona un lead, traer sus mensajes completos en query targeted.
+  // Esto garantiza que el chat abierto tiene todos los mensajes aunque la tabla
+  // global haya crecido > 1000 mensajes (límite duro de PostgREST).
+  useEffect(() => {
+    if (selectedId) void loadLeadMessages(selectedId);
+  }, [selectedId, loadLeadMessages]);
 
   const changeStage = async (newKey: string) => {
     if (!selected || changingStage) return;
@@ -275,6 +284,16 @@ export default function Inbox() {
               >
                 {assignedAgent ? assignedAgent.name.split(' ')[0] : '+ Asignar'}
               </button>
+              {isAdmin && (
+                <button
+                  onClick={() => setShowMerge(true)}
+                  title="Unificar con otro contacto"
+                  aria-label="Unificar con otro contacto"
+                  className="text-lg hover:scale-110 transition-transform p-1"
+                >
+                  🔗
+                </button>
+              )}
             </div>
           </div>
 
@@ -404,6 +423,16 @@ export default function Inbox() {
           open={showReminder}
           onClose={() => setShowReminder(false)}
           lead={selected}
+        />
+      )}
+
+      {/* Merge contacts modal */}
+      {selected && showMerge && (
+        <MergeContactsModal
+          currentLeadId={selected.id}
+          currentLeadName={selected.name}
+          onClose={() => setShowMerge(false)}
+          onMerged={() => { void refreshLeads(); setSelectedId(null); }}
         />
       )}
 

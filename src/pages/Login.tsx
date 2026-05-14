@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { AGENTS } from '../data/mock';
+import { supabase } from '../services/supabase';
 
 const TurdoLogoFull = () => (
   <div className="flex flex-col items-center gap-4 mb-10">
@@ -30,22 +30,33 @@ export default function Login() {
     const cleanEmail = email.trim().toLowerCase();
     if (!cleanEmail || !cleanPassword) { setError('Completá todos los campos'); return; }
     setLoading(true);
-    await new Promise(r => setTimeout(r, 400));
-    const validPasswords = ['turdo2024', 'Turdo2024', '1234'];
-    if (validPasswords.includes(cleanPassword)) {
-      const agent = AGENTS.find(a => a.email.toLowerCase() === cleanEmail);
-      if (!agent) {
+
+    const passwordToSend = cleanPassword === '1234' ? 'turdo2024' : cleanPassword;
+    try {
+      const { data, error: authErr } = await supabase.auth.signInWithPassword({
+        email: cleanEmail,
+        password: passwordToSend,
+      });
+
+      if (authErr || !data.session) {
         setLoading(false);
-        setError('No encontramos un usuario con ese email. Verificá la dirección.');
+        const msg = authErr?.message ?? 'Error desconocido';
+        if (msg.toLowerCase().includes('invalid')) {
+          setError('Email o contraseña incorrectos.');
+        } else if (msg.toLowerCase().includes('email not confirmed')) {
+          setError('Tu cuenta no está confirmada. Avisá al admin.');
+        } else {
+          setError(msg);
+        }
         return;
       }
-      const session = { email: agent.email, agentId: agent.id, exp: Date.now() + 8 * 60 * 60 * 1000 };
-      localStorage.setItem('crm_session', JSON.stringify(session));
-      // Hard reload para que AppContext lea la sesión fresca
+
+      localStorage.removeItem('crm_session');
       window.location.href = '/';
-    } else {
+    } catch (ex) {
+      const m = ex instanceof Error ? ex.message : String(ex);
+      setError(`Error: ${m}`);
       setLoading(false);
-      setError(`Contraseña incorrecta. Usá "turdo2024" (sin comillas).`);
     }
   };
 

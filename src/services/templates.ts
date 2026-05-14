@@ -67,5 +67,5 @@ export function renderTemplate(body: string, ctx: { lead: Lead; agent: Agent }):
     .replaceAll('{email}', lead.email ?? '')
     .replaceAll('{propiedad}', lead.propertyTitle ?? 'la propiedad consultada')
     .replaceAll('{agente}', agent.name.split(' ')[0])
-    .replaceAll('{sucursal}', lead.branch ?? 'Sucursal Centro');
+    .replaceAll('{sucursal}', lead.branch ?? 'Corrientes');
 }

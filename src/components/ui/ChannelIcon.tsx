@@ -9,6 +9,7 @@ const cfg: Record<Channel, { label: string; color: string; dot: string }> = {
   zonaprop:     { label: 'ZonaProp',     color: '#92400E', dot: '#F97316' },
   argenprop:    { label: 'Argenprop',    color: '#166534', dot: '#4ADE80' },
   mercadolibre: { label: 'MercadoLibre', color: '#713F12', dot: '#EAB308' },
+  'walk-in':    { label: 'Local',        color: '#7C2D12', dot: '#C2410C' },
 };
 
 interface Props {

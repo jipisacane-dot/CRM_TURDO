@@ -1,6 +1,7 @@
 import { NavLink } from 'react-router-dom';
 import { useApp } from '../../contexts/AppContext';
 import { usePushNotifications } from '../../hooks/usePushNotifications';
+import { supabase } from '../../services/supabase';
 
 const Icon = ({ d, size = 16 }: { d: string; size?: number }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
@@ -59,6 +60,8 @@ const NAV_GROUPS: NavGroup[] = [
     label: 'Negocio',
     items: [
       { to: '/properties',   iconKey: 'properties', label: 'Propiedades'  },
+      { to: '/mis-propiedades', iconKey: 'properties', label: 'Mis propiedades' },
+      { to: '/cola-guiones', iconKey: 'sparkle', label: 'Cola de guiones' },
       { to: '/operations',   iconKey: 'operations', label: 'Operaciones'  },
       { to: '/negotiations', iconKey: 'handshake',  label: 'Negociaciones' },
       { to: '/tasar',        iconKey: 'sparkle',    label: 'Tasación IA'   },
@@ -134,9 +137,12 @@ export const Sidebar = () => {
     }))
     .filter(g => g.items.length > 0);
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
     localStorage.removeItem('crm_session');
-    // Hard reload para que AppContext lea sesión limpia y se vea bien el login
+    Object.keys(localStorage)
+      .filter(k => k.startsWith('agent_dbid_'))
+      .forEach(k => localStorage.removeItem(k));
+    await supabase.auth.signOut();
     window.location.href = '/login';
   };
 

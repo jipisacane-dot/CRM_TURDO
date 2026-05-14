@@ -11,18 +11,33 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
 const sb = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-const CORS_HEADERS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-};
+// Whitelist de orígenes. Bloquea uso de la edge function desde fuera del CRM
+// (importante porque consume Anthropic API y se factura por uso).
+const ALLOWED_ORIGINS = [
+  'https://crm-turdo.vercel.app',
+  'http://localhost:5173',
+  'http://localhost:4173',
+];
+const isPreviewVercel = (o: string) => /^https:\/\/crm-turdo-[a-z0-9]+-jipisacane-5891s-projects\.vercel\.app$/.test(o);
 
-const SSE_HEADERS = {
-  ...CORS_HEADERS,
+function buildCors(req: Request): Record<string, string> | null {
+  const origin = req.headers.get('origin') ?? '';
+  const allowed = ALLOWED_ORIGINS.includes(origin) || isPreviewVercel(origin);
+  if (!allowed) return null;
+  return {
+    'Access-Control-Allow-Origin': origin,
+    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Vary': 'Origin',
+  };
+}
+
+const buildSseHeaders = (cors: Record<string, string>) => ({
+  ...cors,
   'Content-Type': 'text/event-stream',
   'Cache-Control': 'no-cache',
   'Connection': 'keep-alive',
-};
+});
 
 // ── Tool labels para mostrar en UI ─────────────────────────────────────────
 
@@ -365,15 +380,17 @@ async function streamClaude(
 // ── Handler principal ──────────────────────────────────────────────────────
 
 Deno.serve(async (req: Request) => {
-  if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS_HEADERS });
-  if (req.method !== 'POST') return new Response('Method not allowed', { status: 405, headers: CORS_HEADERS });
+  const cors = buildCors(req);
+  if (!cors) return new Response('Forbidden origin', { status: 403 });
+  if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
+  if (req.method !== 'POST') return new Response('Method not allowed', { status: 405, headers: cors });
 
   const body = await req.json() as { history?: ChatMessage[]; question: string; role?: string; user_email?: string };
   if (!body.question?.trim()) {
-    return new Response(JSON.stringify({ error: 'Falta la pregunta' }), { status: 400, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' } });
+    return new Response(JSON.stringify({ error: 'Falta la pregunta' }), { status: 400, headers: { ...cors, 'Content-Type': 'application/json' } });
   }
   if (body.role !== 'admin') {
-    return new Response(JSON.stringify({ error: 'Solo admin' }), { status: 403, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' } });
+    return new Response(JSON.stringify({ error: 'Solo admin' }), { status: 403, headers: { ...cors, 'Content-Type': 'application/json' } });
   }
   _currentUserEmail = body.user_email ?? 'leticia@turdogroup.com';
 
@@ -442,5 +459,5 @@ Deno.serve(async (req: Request) => {
     },
   });
 
-  return new Response(stream, { headers: SSE_HEADERS });
+  return new Response(stream, { headers: buildSseHeaders(cors) });
 });

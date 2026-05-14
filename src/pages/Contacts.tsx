@@ -7,6 +7,7 @@ import { formatDistanceToNow } from 'date-fns';
 import { es } from 'date-fns/locale';
 import type { Lead } from '../types';
 import { supabase } from '../services/supabase';
+import CreateContactModal from '../components/CreateContactModal';
 
 const statusColors: Record<string, string> = {
   new: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
@@ -50,6 +51,7 @@ export default function Contacts() {
   const [channelFilter, setChannelFilter] = useState('all');
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState<{ ok: number; errors: number } | null>(null);
+  const [showCreate, setShowCreate] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const isAdmin = currentUser.role === 'admin';
@@ -101,7 +103,7 @@ export default function Contacts() {
         notes: notes || null,
         channel: 'web',
         status: 'new',
-        branch: 'Sucursal Centro',
+        branch: 'Corrientes',
       });
       if (error) errors++; else ok++;
     }
@@ -130,8 +132,25 @@ export default function Contacts() {
             <span>⬆</span>
             {importing ? 'Importando...' : 'Importar CSV'}
           </button>
+          <button
+            onClick={() => setShowCreate(true)}
+            className="flex items-center gap-2 px-4 py-2.5 bg-crimson hover:bg-crimson-light text-white text-sm font-semibold rounded-xl transition-all"
+          >
+            <span>+</span>
+            Crear contacto
+          </button>
         </div>
       </div>
+
+      {showCreate && (
+        <CreateContactModal
+          isAdmin={isAdmin}
+          currentAgentDbId={currentUser.dbId}
+          currentAgentBranch={currentUser.branch}
+          onClose={() => setShowCreate(false)}
+          onCreated={() => { void refreshLeads(); }}
+        />
+      )}
 
       {importResult && (
         <div className={`px-4 py-3 rounded-xl border text-sm ${importResult.errors === 0 ? 'bg-green-900/20 border-green-800/40 text-green-400' : 'bg-yellow-900/20 border-yellow-800/40 text-yellow-400'}`}>

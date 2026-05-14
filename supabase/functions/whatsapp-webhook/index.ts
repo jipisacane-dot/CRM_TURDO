@@ -8,6 +8,33 @@ const supabase = createClient(
 const VERIFY_TOKEN = Deno.env.get('WA_WEBHOOK_VERIFY_TOKEN') ?? 'turdo_crm_wa_2026';
 const WA_TOKEN = Deno.env.get('WHATSAPP_TOKEN') ?? Deno.env.get('FB_PAGE_ACCESS_TOKEN') ?? '';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
+const META_APP_SECRET = Deno.env.get('META_APP_SECRET') ?? '';
+
+// Valida firma HMAC-SHA256 que Meta envía en x-hub-signature-256.
+// Si META_APP_SECRET no está configurado, pasa con warning para no romper webhooks
+// (modo gracia hasta que el secret se cargue en Supabase secrets).
+async function verifyMetaSignature(req: Request, rawBody: string): Promise<boolean> {
+  if (!META_APP_SECRET) {
+    console.warn('META_APP_SECRET no configurado — saltando verificación HMAC');
+    return true;
+  }
+  const sigHeader = req.headers.get('x-hub-signature-256');
+  if (!sigHeader?.startsWith('sha256=')) return false;
+  const expected = sigHeader.slice(7);
+  const key = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(META_APP_SECRET),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign']
+  );
+  const sigBuf = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(rawBody));
+  const computed = Array.from(new Uint8Array(sigBuf)).map(b => b.toString(16).padStart(2, '0')).join('');
+  if (computed.length !== expected.length) return false;
+  let diff = 0;
+  for (let i = 0; i < computed.length; i++) diff |= computed.charCodeAt(i) ^ expected.charCodeAt(i);
+  return diff === 0;
+}
 
 // Tipos de media de WhatsApp Cloud → categoría que guardamos en messages.media_type
 const WA_MEDIA_TYPES = ['image', 'video', 'audio', 'document', 'sticker', 'voice'] as const;
@@ -21,7 +48,7 @@ interface WAMedia {
 }
 
 // Descarga la media de Meta (con auth) y la sube al bucket chat-media. Retorna URL pública.
-async function downloadAndStore(mediaId: string, contactId: string, msgId: string, mime: string, originalName?: string): Promise<{ url: string; size: number; filename: string } | null> {
+async function downloadAndStore(mediaId: string, contactId: string, msgId: string, mime: string, originalName?: string): Promise<{ url: string; path: string; size: number; filename: string } | null> {
   try {
     // 1. Get URL temporal de Meta
     const metaResp = await fetch(`https://graph.facebook.com/v21.0/${mediaId}`, {
@@ -59,8 +86,11 @@ async function downloadAndStore(mediaId: string, contactId: string, msgId: strin
       return null;
     }
 
-    const { data: pub } = supabase.storage.from('chat-media').getPublicUrl(path);
-    return { url: pub.publicUrl, size: buffer.length, filename };
+    // Bucket es privado: generamos signed URL temporal (1 año, para que la URL guardada en
+    // messages.media_url sirva al menos como fallback). El frontend prefiere media_path
+    // y regenera signed URL fresca al renderizar.
+    const { data: signed } = await supabase.storage.from('chat-media').createSignedUrl(path, 365 * 24 * 3600);
+    return { url: signed?.signedUrl ?? '', path, size: buffer.length, filename };
   } catch (e) {
     console.error('downloadAndStore err', e);
     return null;
@@ -81,8 +111,16 @@ Deno.serve(async (req) => {
 
   if (req.method !== 'POST') return new Response('Method not allowed', { status: 405 });
 
+  // Leer body como text primero para verificar HMAC (no se puede re-leer el stream)
+  const rawBody = await req.text();
+  const sigOk = await verifyMetaSignature(req, rawBody);
+  if (!sigOk) {
+    console.warn('WA webhook: firma HMAC inválida, rechazando');
+    return new Response('Invalid signature', { status: 403 });
+  }
+
   let body: Record<string, unknown>;
-  try { body = await req.json(); }
+  try { body = JSON.parse(rawBody); }
   catch { return new Response('Invalid JSON', { status: 400 }); }
 
   console.log('WA webhook:', JSON.stringify(body).slice(0, 500));
@@ -120,28 +158,20 @@ Deno.serve(async (req) => {
         ) as Record<string, unknown> | undefined;
         const name = (contactInfo?.profile as Record<string, unknown>)?.name as string || phone;
 
-        const { data: existing } = await supabase
-          .from('contacts')
-          .select('id, name')
-          .eq('channel', 'whatsapp')
-          .eq('phone', phone)
-          .maybeSingle();
-
-        let contactId: string;
-        if (existing) {
-          contactId = existing.id;
-          if (existing.name === 'Sin nombre' || existing.name === phone) {
-            await supabase.from('contacts').update({ name, updated_at: new Date().toISOString() }).eq('id', contactId);
-          }
-        } else {
-          const { data: newContact, error: insertErr } = await supabase
-            .from('contacts')
-            .insert({ channel: 'whatsapp', phone, name, status: 'new', branch: 'Sucursal Centro' })
-            .select('id')
-            .single();
-          if (insertErr || !newContact) { console.error('Insert error:', insertErr); continue; }
-          contactId = newContact.id;
-        }
+        // Lookup-then-insert atómico vía RPC: matchea por channel_id, phone normalizado
+        // o email. Si encuentra contact existente del mismo humano (aunque sea por otro
+        // canal), reutiliza ese contact_id en lugar de duplicarlo.
+        const { data: contactIdRpc, error: rpcErr } = await supabase.rpc('find_or_create_contact', {
+          p_channel: 'whatsapp',
+          p_channel_id: from,
+          p_name: name,
+          p_phone: phone,
+          p_email: null,
+          p_avatar_url: null,
+          p_branch: 'Sucursal Centro',
+        });
+        if (rpcErr || !contactIdRpc) { console.error('find_or_create_contact err:', rpcErr); continue; }
+        const contactId: string = contactIdRpc as string;
 
         // Construir el record de mensaje
         const msgRecord: Record<string, unknown> = {
@@ -172,6 +202,7 @@ Deno.serve(async (req) => {
             );
             if (stored) {
               msgRecord.media_url = stored.url;
+              msgRecord.media_path = stored.path;
               msgRecord.media_size_bytes = stored.size;
               if (!msgRecord.media_filename) msgRecord.media_filename = stored.filename;
             }

@@ -9,10 +9,26 @@ const VAPID_PUBLIC  = Deno.env.get('VAPID_PUBLIC_KEY')!;
 const VAPID_PRIVATE = Deno.env.get('VAPID_PRIVATE_KEY')!;
 const VAPID_SUBJECT = Deno.env.get('VAPID_SUBJECT') ?? 'mailto:turdoleticia@gmail.com';
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-};
+// CORS lockdown: solo origenes permitidos.
+const ALLOWED_ORIGINS = [
+  'https://crm-turdo.vercel.app',
+  'http://localhost:5173',
+  'http://localhost:4173',
+];
+const isPreviewVercel = (o: string) =>
+  /^https:\/\/crm-turdo-[a-z0-9]+-jipisacane-5891s-projects\.vercel\.app$/.test(o);
+
+function buildCors(req: Request): Record<string, string> | null {
+  const origin = req.headers.get('origin') ?? '';
+  const allowed = ALLOWED_ORIGINS.includes(origin) || isPreviewVercel(origin);
+  if (!allowed) return null;
+  return {
+    'Access-Control-Allow-Origin': origin,
+    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Vary': 'Origin',
+  };
+}
 
 // ── VAPID helpers (manual implementation for Deno) ────────────────────────────
 
@@ -117,7 +133,9 @@ async function encryptPayload(
 // ── Main handler ──────────────────────────────────────────────────────────────
 
 Deno.serve(async (req) => {
-  if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
+  const cors = buildCors(req);
+  if (!cors) return new Response('Forbidden origin', { status: 403 });
+  if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
 
   try {
     const { title, body, contact_id, url, agent_id } = await req.json() as {
@@ -127,7 +145,7 @@ Deno.serve(async (req) => {
     let query = supabase.from('push_subscriptions').select('*');
     if (agent_id) query = query.eq('agent_id', agent_id);
     const { data: subs } = await query;
-    if (!subs?.length) return new Response(JSON.stringify({ sent: 0 }), { headers: corsHeaders });
+    if (!subs?.length) return new Response(JSON.stringify({ sent: 0 }), { headers: cors });
 
     const payload = JSON.stringify({ title, body, contact_id, url: url ?? '/inbox' });
     let sent = 0;
@@ -159,8 +177,8 @@ Deno.serve(async (req) => {
       }
     }
 
-    return new Response(JSON.stringify({ sent }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    return new Response(JSON.stringify({ sent }), { headers: { ...cors, 'Content-Type': 'application/json' } });
   } catch (e) {
-    return new Response(JSON.stringify({ error: String(e) }), { status: 500, headers: corsHeaders });
+    return new Response(JSON.stringify({ error: String(e) }), { status: 500, headers: cors });
   }
 });

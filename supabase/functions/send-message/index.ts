@@ -12,11 +12,27 @@ const IG_BUSINESS_ID     = Deno.env.get('IG_BUSINESS_ACCOUNT_ID') ?? 'me';
 const MANYCHAT_KEY       = Deno.env.get('MANYCHAT_API_KEY')!;
 const WA_PHONE_NUMBER_ID = Deno.env.get('WHATSAPP_PHONE_NUMBER_ID');
 
-const cors = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-  'Content-Type': 'application/json',
-};
+// Whitelist de orígenes permitidos. Bloquea curl directo sin Origin
+// y browsers desde dominios no autorizados.
+const ALLOWED_ORIGINS = [
+  'https://crm-turdo.vercel.app',
+  'http://localhost:5173',
+  'http://localhost:4173',
+];
+const isPreviewVercel = (o: string) => /^https:\/\/crm-turdo-[a-z0-9]+-jipisacane-5891s-projects\.vercel\.app$/.test(o);
+
+function buildCors(req: Request): Record<string, string> | null {
+  const origin = req.headers.get('origin') ?? '';
+  const allowed = ALLOWED_ORIGINS.includes(origin) || isPreviewVercel(origin);
+  if (!allowed) return null;
+  return {
+    'Access-Control-Allow-Origin': origin,
+    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Content-Type': 'application/json',
+    'Vary': 'Origin',
+  };
+}
 
 // ── WhatsApp Cloud API ────────────────────────────────────────────────────────
 interface WAMediaArgs { url: string; type: 'image' | 'video' | 'audio' | 'document'; caption?: string; filename?: string }
@@ -182,6 +198,8 @@ async function getMCSubscriber(mcId: string): Promise<{ ig_id?: string; whatsapp
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 Deno.serve(async (req) => {
+  const cors = buildCors(req);
+  if (!cors) return new Response('Forbidden origin', { status: 403 });
   try {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
   if (req.method !== 'POST') return new Response('Method not allowed', { status: 405, headers: cors });
@@ -189,13 +207,13 @@ Deno.serve(async (req) => {
   let body: {
     contact_id: string; content: string; agent_id?: string;
     media_type?: 'image' | 'video' | 'audio' | 'document';
-    media_url?: string; media_caption?: string; media_mime?: string;
+    media_url?: string; media_path?: string; media_caption?: string; media_mime?: string;
     media_filename?: string; media_size_bytes?: number;
   };
   try { body = await req.json(); }
   catch { return new Response(JSON.stringify({ error: 'Invalid JSON' }), { status: 400, headers: cors }); }
 
-  const { contact_id, content, agent_id, media_type, media_url, media_caption, media_mime, media_filename, media_size_bytes } = body;
+  const { contact_id, content, agent_id, media_type, media_url, media_path, media_caption, media_mime, media_filename, media_size_bytes } = body;
   if (!contact_id || (!content && !media_url))
     return new Response(JSON.stringify({ error: 'Missing fields' }), { status: 400, headers: cors });
 
@@ -213,6 +231,7 @@ Deno.serve(async (req) => {
     agent_id: agent_id ?? null, read: true,
     media_type: media_type ?? null,
     media_url: media_url ?? null,
+    media_path: media_path ?? null,
     media_caption: media_caption ?? null,
     media_mime: media_mime ?? null,
     media_filename: media_filename ?? null,

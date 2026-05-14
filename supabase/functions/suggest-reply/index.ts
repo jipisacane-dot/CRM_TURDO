@@ -10,11 +10,26 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
 const sb = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-const CORS_HEADERS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-};
+// CORS lockdown: solo dominios permitidos pueden invocar esta edge function.
+const ALLOWED_ORIGINS = [
+  'https://crm-turdo.vercel.app',
+  'http://localhost:5173',
+  'http://localhost:4173',
+];
+const isPreviewVercel = (o: string) =>
+  /^https:\/\/crm-turdo-[a-z0-9]+-jipisacane-5891s-projects\.vercel\.app$/.test(o);
+
+function buildCors(req: Request): Record<string, string> | null {
+  const origin = req.headers.get('origin') ?? '';
+  const allowed = ALLOWED_ORIGINS.includes(origin) || isPreviewVercel(origin);
+  if (!allowed) return null;
+  return {
+    'Access-Control-Allow-Origin': origin,
+    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Vary': 'Origin',
+  };
+}
 
 const SYSTEM_PROMPT = `Sos un asistente de respuestas para vendedores inmobiliarios de Turdo (Mar del Plata, Argentina).
 
@@ -61,6 +76,8 @@ interface MessageRow {
 }
 
 Deno.serve(async (req) => {
+  const CORS_HEADERS = buildCors(req);
+  if (!CORS_HEADERS) return new Response('Forbidden origin', { status: 403 });
   if (req.method === 'OPTIONS') return new Response(null, { headers: CORS_HEADERS });
   if (req.method !== 'POST') return new Response('Method not allowed', { status: 405, headers: CORS_HEADERS });
 

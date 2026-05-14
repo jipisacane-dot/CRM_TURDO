@@ -2,7 +2,11 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Sidebar, MobileNav } from './Sidebar';
 import GlobalSearch from '../GlobalSearch';
+import { supabase } from '../../services/supabase';
 
+// Mantenido por compatibilidad con código viejo que importa checkSession.
+// Devuelve true si hay sesión Supabase Auth válida, false si no.
+// Usar asíncrona en lugar es preferido; esta versión sin auth solo lee localStorage legacy.
 export const checkSession = () => {
   try {
     const raw = localStorage.getItem('crm_session');
@@ -19,11 +23,19 @@ export const AppLayout = ({ children }: { children: ReactNode }) => {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    if (!checkSession()) {
-      navigate('/login', { replace: true });
-    } else {
-      setReady(true);
-    }
+    // Validar sesión Supabase Auth (asíncrono porque hay refresh de token internamente)
+    supabase.auth.getSession().then(({ data }) => {
+      if (data.session) {
+        setReady(true);
+      } else {
+        navigate('/login', { replace: true });
+      }
+    });
+    // Reaccionar a logout en otra tab
+    const { data: sub } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_OUT') navigate('/login', { replace: true });
+    });
+    return () => { sub.subscription.unsubscribe(); };
   }, [navigate]);
 
   // Skeleton placeholder mientras valida sesión (evita flash blanco)

@@ -10,11 +10,26 @@ const supabase = createClient(
 
 const PUBLIC_BASE_URL = Deno.env.get('PUBLIC_PORTAL_BASE_URL') ?? 'https://crm-turdo.vercel.app';
 
-const CORS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-};
+// CORS lockdown: solo dominios permitidos pueden invocar esta edge function.
+const ALLOWED_ORIGINS = [
+  'https://crm-turdo.vercel.app',
+  'http://localhost:5173',
+  'http://localhost:4173',
+];
+const isPreviewVercel = (o: string) =>
+  /^https:\/\/crm-turdo-[a-z0-9]+-jipisacane-5891s-projects\.vercel\.app$/.test(o);
+
+function buildCors(req: Request): Record<string, string> | null {
+  const origin = req.headers.get('origin') ?? '';
+  const allowed = ALLOWED_ORIGINS.includes(origin) || isPreviewVercel(origin);
+  if (!allowed) return null;
+  return {
+    'Access-Control-Allow-Origin': origin,
+    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Vary': 'Origin',
+  };
+}
 
 function generateToken(length = 10): string {
   const chars = 'abcdefghijkmnpqrstuvwxyz23456789'; // sin l/o/0/1 para legibilidad
@@ -26,6 +41,8 @@ function generateToken(length = 10): string {
 }
 
 Deno.serve(async (req) => {
+  const CORS = buildCors(req);
+  if (!CORS) return new Response('Forbidden origin', { status: 403 });
   if (req.method === 'OPTIONS') return new Response(null, { headers: CORS });
   if (req.method !== 'POST') return new Response('Method not allowed', { status: 405, headers: CORS });
 

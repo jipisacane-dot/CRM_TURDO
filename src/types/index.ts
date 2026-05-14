@@ -1,6 +1,6 @@
-export type Channel = 'whatsapp' | 'instagram' | 'facebook' | 'email' | 'web' | 'zonaprop' | 'argenprop' | 'mercadolibre';
+export type Channel = 'whatsapp' | 'instagram' | 'facebook' | 'email' | 'web' | 'zonaprop' | 'argenprop' | 'mercadolibre' | 'walk-in';
 export type LeadStatus = 'new' | 'contacted' | 'qualified' | 'proposal' | 'visit' | 'won' | 'lost';
-export type Branch = 'Sucursal Centro' | 'Sucursal Norte';
+export type Branch = 'Corrientes' | 'Alem';
 export type PropertyType = 'Departamento' | 'Casa' | 'Terreno' | 'Local' | 'Oficina' | 'PH';
 export type Operation = 'Venta' | 'Alquiler' | 'Alquiler Temporal';
 export type Portal = 'ZonaProp' | 'Argenprop' | 'MercadoLibre' | 'Web Propia' | 'Instagram' | 'Facebook';
@@ -34,6 +34,7 @@ export interface Message {
   read: boolean;
   media_type?: 'image' | 'video' | 'audio' | 'document' | 'sticker' | null;
   media_url?: string | null;
+  media_path?: string | null;
   media_caption?: string | null;
   media_mime?: string | null;
   media_filename?: string | null;
