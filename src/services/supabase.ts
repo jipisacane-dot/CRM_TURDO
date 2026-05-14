@@ -83,27 +83,37 @@ export const db = {
       const contactList = (contacts ?? []) as DBContact[];
       if (contactList.length === 0) return [];
 
-      // Notas críticas:
-      //   1. .in('contact_id', [387 UUIDs]) genera URL > 14KB → PostgREST HTTP 400.
-      //      Solo usamos .in() cuando hay pocos contactos (vendedor).
-      //   2. Supabase tiene HARD LIMIT 1000 rows por query (no se puede superar
-      //      con .range()). Ordenamos DESC para traer los 1000 mensajes MÁS
-      //      RECIENTES y los revertimos en cliente. Los chats activos quedan
-      //      completos; solo se pierden mensajes muy viejos (>1000 mensajes
-      //      atrás), que en la UI raramente importan.
+      // Trae los mensajes de TODOS los contacts cargados, chunkeado en grupos
+      // de 80 contact_ids para no rebasar el URL limit de PostgREST (~14 KB)
+      // ni el hard limit de 1000 rows por query. Sin esto:
+      //  - .in() con muchos UUIDs → URL > 14KB → 400
+      //  - sin filtro → trae últimos 1000 globales y deja sin mensajes a chats viejos
+      // 80 UUIDs en URL ≈ 3 KB, queda holgado.
       const ids = contactList.map(c => c.id);
-      let messagesQuery = supabase
-        .from('messages')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(1000);
-      if (ids.length <= 100) {
-        messagesQuery = messagesQuery.in('contact_id', ids);
+      const CHUNK = 80;
+      const chunks: string[][] = [];
+      for (let i = 0; i < ids.length; i += CHUNK) chunks.push(ids.slice(i, i + CHUNK));
+
+      const results = await Promise.all(
+        chunks.map(chunk =>
+          supabase
+            .from('messages')
+            .select('*')
+            .in('contact_id', chunk)
+            .order('created_at', { ascending: false })
+            .limit(1000),
+        ),
+      );
+
+      const allMessages: DBMessage[] = [];
+      for (const r of results) {
+        if (r.error) throw r.error;
+        allMessages.push(...((r.data ?? []) as DBMessage[]));
       }
-      const { data: messagesDesc, error: me } = await messagesQuery;
-      if (me) throw me;
-      // Revertir para que el orden quede ascendente (más viejo arriba, reciente abajo).
-      const messages = ((messagesDesc ?? []) as DBMessage[]).reverse();
+      // Orden ascendente (más viejo arriba, reciente abajo) para el UI del chat
+      const messages = allMessages.sort(
+        (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+      );
 
       const msgByContact = new Map<string, DBMessage[]>();
       for (const m of (messages ?? []) as DBMessage[]) {
