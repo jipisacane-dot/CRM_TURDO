@@ -117,7 +117,11 @@ export default function Inbox() {
     const result = await sendMessage(selected.id, text);
     setSending(false);
     if (!result.ok) {
-      if (result.outside_window) {
+      if (result.auth_error) {
+        setSendError('⚠ Token de Meta vencido — el admin debe renovar el token de la app en developers.facebook.com (afecta WhatsApp, Instagram y Facebook por igual).');
+      } else if (result.permission_error) {
+        setSendError('⚠ La app de Meta no tiene los permisos necesarios. Avisale al admin para revisar permisos en developers.facebook.com.');
+      } else if (result.outside_window) {
         setSendError('Pasaron más de 24hs desde el último mensaje del contacto. WhatsApp e Instagram solo permiten responder dentro de ese período. Pedile al contacto que te escriba primero.');
       } else {
         setSendError('No se pudo enviar el mensaje. Revisá que el contacto esté activo en el canal.');

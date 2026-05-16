@@ -53,6 +53,8 @@ const toLead = (c: DBContact & { current_stage_key?: string | null; stage_change
 interface SendResult {
   ok: boolean;
   outside_window?: boolean;
+  auth_error?: boolean;       // token expirado/inválido (Meta code 190)
+  permission_error?: boolean; // falta permission scope (Meta code 200)
   error?: string;
 }
 
@@ -412,9 +414,21 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
 
     const delivery = data?.delivery;
     if (delivery && !delivery.ok) {
+      // Parse Meta error code from the error string to categorize failure mode
+      let auth_error = false;
+      let permission_error = false;
+      const errStr = String(delivery.error ?? '');
+      // Match patterns like "code":190 or "code: 190"
+      const codeMatch = errStr.match(/"code"\s*:\s*(\d+)/);
+      const code = codeMatch ? parseInt(codeMatch[1], 10) : null;
+      if (code === 190 || /OAuthException|access token/i.test(errStr)) auth_error = true;
+      if (code === 200 || /requires.*permission/i.test(errStr)) permission_error = true;
+
       return {
         ok: false,
         outside_window: delivery.outside_window,
+        auth_error,
+        permission_error,
         error: delivery.error,
       };
     }
