@@ -220,6 +220,11 @@ export default function Inbox() {
                     </div>
                     <span className="text-muted text-[10px] flex-shrink-0">{formatDistanceToNow(new Date(lead.lastActivity), { locale: es, addSuffix: false })}</span>
                   </div>
+                  {(lead.phone || lead.email) && (
+                    <div className="text-muted text-[10px] font-mono truncate mt-0.5">
+                      {lead.phone || lead.email}
+                    </div>
+                  )}
                   <div className="flex items-center gap-1 mt-0.5">
                     <ChannelIcon channel={lead.channel} size="sm" />
                     {lead.assignedTo ? (
@@ -265,6 +270,9 @@ export default function Inbox() {
               </div>
               <div className="flex items-center gap-2 flex-wrap">
                 <ChannelIcon channel={selected.channel} size="sm" showLabel />
+                {selected.phone && (
+                  <span className="text-muted text-xs font-mono">{selected.phone}</span>
+                )}
                 {selected.propertyTitle && <span className="text-muted text-xs truncate">{selected.propertyTitle}</span>}
               </div>
             </div>

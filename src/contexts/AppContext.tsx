@@ -227,61 +227,85 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   }, [refreshReminders]);
 
   // Realtime subscription — update only the affected contact
-  // Plus polling fallback every 30s in case WS dies silently (critical for go-live).
+  // Robust: auto-reconnect on disconnect + polling fallback + onFocus refresh.
   useEffect(() => {
-    let healthy = true;
+    let healthy = false;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let reconnectAttempts = 0;
+    let currentChannel: ReturnType<typeof supabase.channel> | null = null;
+    let unmounted = false;
 
-    const channel = supabase
-      .channel('crm-realtime')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, async (payload) => {
-        const newMsg = payload.new as DBMessage;
-        const messages = await db.messages.forContact(newMsg.contact_id);
-        setLeads(prev => {
-          // If contact not in state yet, trigger refresh
-          if (!prev.some(l => l.id === newMsg.contact_id)) {
-            refreshLeads();
-            return prev;
-          }
-          return prev.map(l => {
-            if (l.id !== newMsg.contact_id) return l;
-            return {
-              ...l,
-              lastActivity: newMsg.created_at,
-              messages: toMessages(messages, l.channel),
-            };
-          });
-        });
-      })
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'contacts' }, () => {
-        refreshLeads();
-      })
-      .subscribe((status) => {
-        console.log('[realtime] status:', status);
-        if (status === 'SUBSCRIBED') {
-          healthy = true;
-        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
-          healthy = false;
-          console.warn('[realtime] degraded, polling fallback will catch up');
+    const handleNewMessage = async (payload: { new: DBMessage }) => {
+      const newMsg = payload.new;
+      const messages = await db.messages.forContact(newMsg.contact_id);
+      setLeads(prev => {
+        if (!prev.some(l => l.id === newMsg.contact_id)) {
+          refreshLeads();
+          return prev;
         }
+        return prev.map(l => {
+          if (l.id !== newMsg.contact_id) return l;
+          return {
+            ...l,
+            lastActivity: newMsg.created_at,
+            messages: toMessages(messages, l.channel),
+          };
+        });
       });
+    };
 
-    // Polling fallback: refreshes leads every 30s if realtime is unhealthy
-    // OR every 60s as a safety net even when healthy
+    const connect = () => {
+      if (unmounted) return;
+      // Use unique channel name on each reconnect to avoid stale state
+      const channelName = `crm-realtime-${Date.now()}`;
+      const ch = supabase
+        .channel(channelName)
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, handleNewMessage)
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'contacts' }, () => refreshLeads())
+        .subscribe((status) => {
+          if (status === 'SUBSCRIBED') {
+            healthy = true;
+            reconnectAttempts = 0;
+            console.log('[realtime] ✓ conectado');
+          } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+            healthy = false;
+            if (status !== 'CLOSED') {
+              console.warn('[realtime] desconectado:', status, '— reintentando...');
+            }
+            // Auto-reconnect with exponential backoff (1s, 2s, 4s, 8s, 16s, max 30s)
+            if (!unmounted) {
+              const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000);
+              reconnectAttempts++;
+              if (reconnectTimer) clearTimeout(reconnectTimer);
+              reconnectTimer = setTimeout(() => {
+                if (currentChannel) supabase.removeChannel(currentChannel);
+                refreshLeads(); // catch up while reconnecting
+                connect();
+              }, delay);
+            }
+          }
+        });
+      currentChannel = ch;
+    };
+
+    connect();
+
+    // Polling safety net: refresh every 30s if not healthy
     const interval = setInterval(() => {
-      if (!healthy) {
-        console.log('[realtime] fallback poll');
-        refreshLeads();
-      }
+      if (!healthy) refreshLeads();
     }, 30000);
 
-    // Refresh on window focus (user comes back to tab → sync immediately)
-    const onFocus = () => {
-      if (!healthy) refreshLeads();
-    };
+    // Refresh immediately when user comes back to tab
+    const onFocus = () => { if (!healthy) refreshLeads(); };
     window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && !healthy) refreshLeads();
+    });
 
     return () => {
-      supabase.removeChannel(channel);
+      unmounted = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      if (currentChannel) supabase.removeChannel(currentChannel);
       clearInterval(interval);
       window.removeEventListener('focus', onFocus);
     };
