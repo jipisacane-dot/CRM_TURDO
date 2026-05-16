@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useMemo } from 'react';
 import { useApp } from '../contexts/AppContext';
 import { useNavigate } from 'react-router-dom';
 import { AGENTS } from '../data/mock';
@@ -44,23 +44,35 @@ function ContactAvatar({ lead }: { lead: Lead }) {
 }
 
 export default function Contacts() {
-  const { leads, refreshLeads, loading, currentUser } = useApp();
+  const { leads, refreshLeads, loading, currentUser, bulkAssign } = useApp();
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [channelFilter, setChannelFilter] = useState('all');
+  const [assignmentFilter, setAssignmentFilter] = useState<'all' | 'unassigned' | 'assigned'>('all');
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState<{ ok: number; errors: number } | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
+  // Bulk selection state
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkAgent, setBulkAgent] = useState<string>('');
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkResult, setBulkResult] = useState<{ count: number; agentName: string } | null>(null);
+
   const isAdmin = currentUser.role === 'admin';
   // Vendedores filtran por currentUser.dbId (UUID real), NO por currentUser.id (mock string)
   const scope = isAdmin ? leads : leads.filter(l => currentUser.dbId && l.assignedTo === currentUser.dbId);
 
-  const filtered = scope
+  const filtered = useMemo(() => scope
     .filter(l => statusFilter === 'all' || l.status === statusFilter)
     .filter(l => channelFilter === 'all' || l.channel === channelFilter)
+    .filter(l => {
+      if (assignmentFilter === 'all') return true;
+      if (assignmentFilter === 'unassigned') return !l.assignedTo;
+      return !!l.assignedTo;
+    })
     .filter(l => {
       if (!search) return true;
       const s = search.toLowerCase();
@@ -68,7 +80,69 @@ export default function Contacts() {
         l.phone?.includes(s) ||
         l.email?.toLowerCase().includes(s);
     })
-    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
+    [scope, statusFilter, channelFilter, assignmentFilter, search]
+  );
+
+  // Selection helpers
+  const allFilteredSelected = filtered.length > 0 && filtered.every(l => selectedIds.has(l.id));
+  const someFilteredSelected = filtered.some(l => selectedIds.has(l.id));
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAllFiltered = () => {
+    setSelectedIds(prev => {
+      if (allFilteredSelected) {
+        // Unselect filtered
+        const next = new Set(prev);
+        filtered.forEach(l => next.delete(l.id));
+        return next;
+      } else {
+        // Add all filtered
+        const next = new Set(prev);
+        filtered.forEach(l => next.add(l.id));
+        return next;
+      }
+    });
+  };
+
+  const clearSelection = () => setSelectedIds(new Set());
+
+  // Counts for unassigned filter button
+  const unassignedCount = useMemo(() => scope.filter(l => !l.assignedTo).length, [scope]);
+
+  // Available agents for bulk-assign (mock for now; AGENTS source matches the rest of the app)
+  const assignableAgents = useMemo(
+    () => AGENTS.filter(a => a.role === 'agent'),
+    []
+  );
+
+  const handleBulkAssign = async () => {
+    if (!bulkAgent || selectedIds.size === 0) return;
+    setBulkBusy(true);
+    setBulkResult(null);
+    try {
+      // Translate agent mock id to db id: AGENTS use string ids that match agents.id (UUID) for admin.
+      // For agents in mock, the id IS the db uuid (per AppContext.assignLead pattern).
+      const agentRow = AGENTS.find(a => a.id === bulkAgent);
+      const { updated, error } = await bulkAssign(Array.from(selectedIds), bulkAgent);
+      if (error) {
+        setBulkResult({ count: 0, agentName: `Error: ${error}` });
+      } else {
+        setBulkResult({ count: updated, agentName: agentRow?.name ?? bulkAgent });
+        clearSelection();
+        setBulkAgent('');
+      }
+    } finally {
+      setBulkBusy(false);
+    }
+  };
 
   const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -120,7 +194,12 @@ export default function Contacts() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-white">Contactos</h1>
-          <p className="text-muted text-sm mt-0.5">{leads.length} contactos en total</p>
+          <p className="text-muted text-sm mt-0.5">
+            {leads.length} contactos en total
+            {isAdmin && unassignedCount > 0 && (
+              <> · <span className="text-crimson font-semibold">{unassignedCount} sin asignar</span></>
+            )}
+          </p>
         </div>
         <div className="flex gap-3">
           <input ref={fileRef} type="file" accept=".csv" onChange={handleImport} className="hidden" />
@@ -159,6 +238,15 @@ export default function Contacts() {
         </div>
       )}
 
+      {bulkResult && (
+        <div className={`px-4 py-3 rounded-xl border text-sm ${bulkResult.count > 0 ? 'bg-green-900/20 border-green-800/40 text-green-400' : 'bg-red-900/20 border-red-800/40 text-red-400'}`}>
+          {bulkResult.count > 0
+            ? <>✓ <strong>{bulkResult.count}</strong> contacto{bulkResult.count === 1 ? '' : 's'} asignado{bulkResult.count === 1 ? '' : 's'} a <strong>{bulkResult.agentName}</strong></>
+            : <>✗ {bulkResult.agentName}</>}
+          <button onClick={() => setBulkResult(null)} className="ml-4 opacity-60 hover:opacity-100">✕</button>
+        </div>
+      )}
+
       {/* Filters */}
       <div className="flex gap-3 flex-wrap">
         <input
@@ -167,6 +255,15 @@ export default function Contacts() {
           placeholder="Buscar por nombre, teléfono o email..."
           className="flex-1 min-w-64 bg-bg-input border border-border rounded-xl px-4 py-2.5 text-sm text-white placeholder-muted outline-none focus:border-crimson"
         />
+        <select
+          value={assignmentFilter}
+          onChange={e => setAssignmentFilter(e.target.value as 'all' | 'unassigned' | 'assigned')}
+          className="bg-bg-input border border-border rounded-xl px-3 py-2.5 text-sm text-white outline-none focus:border-crimson"
+        >
+          <option value="all">Todos</option>
+          <option value="unassigned">Sin asignar {unassignedCount > 0 ? `(${unassignedCount})` : ''}</option>
+          <option value="assigned">Asignados</option>
+        </select>
         <select
           value={statusFilter}
           onChange={e => setStatusFilter(e.target.value)}
@@ -188,12 +285,61 @@ export default function Contacts() {
         </select>
       </div>
 
+      {/* Bulk actions bar (sticky when selection > 0) */}
+      {isAdmin && selectedIds.size > 0 && (
+        <div className="sticky top-0 z-10 -mx-6 px-6 py-3 bg-crimson/10 border-y border-crimson/30 backdrop-blur-md flex items-center gap-3 flex-wrap">
+          <div className="flex items-center gap-2 text-sm text-white">
+            <span className="font-semibold text-crimson">{selectedIds.size}</span>
+            <span>seleccionado{selectedIds.size === 1 ? '' : 's'}</span>
+          </div>
+          <div className="h-4 w-px bg-border" />
+          <select
+            value={bulkAgent}
+            onChange={e => setBulkAgent(e.target.value)}
+            disabled={bulkBusy}
+            className="bg-bg-card border border-border rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-crimson"
+          >
+            <option value="">Asignar a...</option>
+            {assignableAgents.map(a => (
+              <option key={a.id} value={a.id}>{a.name} ({a.branch})</option>
+            ))}
+          </select>
+          <button
+            onClick={handleBulkAssign}
+            disabled={!bulkAgent || bulkBusy}
+            className="px-4 py-2 bg-crimson hover:bg-crimson-light disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-semibold rounded-lg transition-all"
+          >
+            {bulkBusy ? 'Asignando...' : `Asignar ${selectedIds.size}`}
+          </button>
+          <button
+            onClick={clearSelection}
+            disabled={bulkBusy}
+            className="px-3 py-2 text-sm text-muted hover:text-white transition-all"
+          >
+            Cancelar
+          </button>
+        </div>
+      )}
+
       {/* Table */}
       <div className="flex-1 bg-bg-card border border-border rounded-2xl overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead>
               <tr className="border-b border-border">
+                {isAdmin && (
+                  <th className="px-4 py-3 w-10">
+                    <input
+                      type="checkbox"
+                      checked={allFilteredSelected}
+                      ref={el => { if (el) el.indeterminate = !allFilteredSelected && someFilteredSelected; }}
+                      onChange={toggleSelectAllFiltered}
+                      disabled={filtered.length === 0}
+                      className="w-4 h-4 rounded border-border bg-bg-input accent-crimson cursor-pointer"
+                      title={allFilteredSelected ? 'Deseleccionar todos' : 'Seleccionar todos los filtrados'}
+                    />
+                  </th>
+                )}
                 <th className="text-left px-4 py-3 text-xs text-muted font-medium uppercase tracking-wider">Contacto</th>
                 <th className="text-left px-4 py-3 text-xs text-muted font-medium uppercase tracking-wider">Teléfono</th>
                 <th className="text-left px-4 py-3 text-xs text-muted font-medium uppercase tracking-wider">Email</th>
@@ -206,15 +352,29 @@ export default function Contacts() {
             </thead>
             <tbody>
               {loading && (
-                <tr><td colSpan={8} className="text-center py-12 text-muted text-sm animate-pulse">Cargando contactos...</td></tr>
+                <tr><td colSpan={isAdmin ? 9 : 8} className="text-center py-12 text-muted text-sm animate-pulse">Cargando contactos...</td></tr>
               )}
               {!loading && filtered.length === 0 && (
-                <tr><td colSpan={8} className="text-center py-12 text-muted text-sm">No se encontraron contactos</td></tr>
+                <tr><td colSpan={isAdmin ? 9 : 8} className="text-center py-12 text-muted text-sm">No se encontraron contactos</td></tr>
               )}
               {filtered.map(lead => {
                 const agent = lead.assignedTo ? AGENTS.find(a => a.id === lead.assignedTo) : null;
+                const isSelected = selectedIds.has(lead.id);
                 return (
-                  <tr key={lead.id} className="border-b border-border/50 hover:bg-bg-hover/50 transition-colors">
+                  <tr
+                    key={lead.id}
+                    className={`border-b border-border/50 transition-colors ${isSelected ? 'bg-crimson/10' : 'hover:bg-bg-hover/50'}`}
+                  >
+                    {isAdmin && (
+                      <td className="px-4 py-3">
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => toggleSelect(lead.id)}
+                          className="w-4 h-4 rounded border-border bg-bg-input accent-crimson cursor-pointer"
+                        />
+                      </td>
+                    )}
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-3">
                         <ContactAvatar lead={lead} />

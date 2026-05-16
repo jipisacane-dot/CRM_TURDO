@@ -63,6 +63,7 @@ interface AppContextType {
   refreshLeads: () => Promise<void>;
   loadLeadMessages: (leadId: string) => Promise<void>;
   assignLead: (leadId: string, agentId: string) => Promise<void>;
+  bulkAssign: (leadIds: string[], agentId: string) => Promise<{ updated: number; error?: string }>;
   updateLeadStatus: (leadId: string, status: Lead['status']) => Promise<void>;
   sendMessage: (leadId: string, content: string) => Promise<SendResult>;
   unreadCount: number;
@@ -272,6 +273,43 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     }).catch(console.error);
   };
 
+  const bulkAssign = async (leadIds: string[], agentId: string): Promise<{ updated: number; error?: string }> => {
+    if (leadIds.length === 0) return { updated: 0 };
+
+    // Batch update in chunks of 500 (PostgREST URL limits)
+    const CHUNK = 500;
+    let totalUpdated = 0;
+    for (let i = 0; i < leadIds.length; i += CHUNK) {
+      const chunk = leadIds.slice(i, i + CHUNK);
+      const { error, count } = await supabase
+        .from('contacts')
+        .update({ assigned_to: agentId }, { count: 'exact' })
+        .in('id', chunk);
+      if (error) {
+        console.error('[bulkAssign] error:', error);
+        return { updated: totalUpdated, error: error.message };
+      }
+      totalUpdated += count ?? chunk.length;
+    }
+
+    // Update local state
+    setLeads(prev => prev.map(l =>
+      leadIds.includes(l.id) ? { ...l, assignedTo: agentId } : l
+    ));
+
+    // Single notification (not 1 per lead)
+    supabase.functions.invoke('send-push', {
+      body: {
+        title: '📋 Leads asignados',
+        body: `Te asignaron ${totalUpdated} contacto${totalUpdated === 1 ? '' : 's'}`,
+        url: '/contacts',
+        agent_id: agentId,
+      },
+    }).catch(console.error);
+
+    return { updated: totalUpdated };
+  };
+
   const updateLeadStatus = async (leadId: string, status: Lead['status']) => {
     await db.contacts.update(leadId, { status });
     setLeads(prev => prev.map(l => l.id === leadId ? { ...l, status } : l));
@@ -329,7 +367,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   );
 
   const value = useMemo<AppContextType>(() => ({
-    currentUser, leads, loading, refreshLeads, loadLeadMessages, assignLead, updateLeadStatus,
+    currentUser, leads, loading, refreshLeads, loadLeadMessages, assignLead, bulkAssign, updateLeadStatus,
     sendMessage, unreadCount, dueReminders, createReminder, completeReminder, refreshReminders,
   }), [currentUser, leads, loading, refreshLeads, loadLeadMessages, unreadCount, dueReminders, refreshReminders]);
 
