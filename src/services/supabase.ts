@@ -72,8 +72,14 @@ export const db = {
 
     async listWithMessages(opts?: { agentId?: string }): Promise<Array<DBContact & { messages: DBMessage[] }>> {
       // Si se pasa agentId, filtrar contactos asignados a ese agente (server-side).
-      // Si no, traer todo (admin).
-      let contactsQuery = supabase.from('contacts').select('*').order('created_at', { ascending: false });
+      // Si no, traer todo (admin). PostgREST tiene un default cap de 1000 rows si
+      // no se especifica range → fix explícito a 10.000 para cubrir el crecimiento
+      // del CRM más allá de 1k contacts (al 16/05 ya son 1122 y subiendo).
+      let contactsQuery = supabase
+        .from('contacts')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .range(0, 9999);
       if (opts?.agentId) {
         contactsQuery = contactsQuery.eq('assigned_to', opts.agentId);
       }
