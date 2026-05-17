@@ -6,6 +6,7 @@
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { requireAuth } from '../_shared/auth.ts';
+import { rateLimit } from '../_shared/rate_limit.ts';
 
 const ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY')!;
 const TOKKO_KEY = Deno.env.get('TOKKO_API_KEY') ?? '';
@@ -770,6 +771,9 @@ Deno.serve(async (req) => {
   const authError = await requireAuth(req, CORS);
   if (authError) return authError;
 
+  const rl = await rateLimit(req, 'appraise-property', 10, 60, CORS);
+  if (rl) return rl;
+
   let body: {
     property?: PropertyInput;
     agent_id?: string;
@@ -785,6 +789,23 @@ Deno.serve(async (req) => {
   const { property, agent_id, agent_email, contact_id, client, photos = [], save = true } = body;
   if (!property?.address) {
     return new Response(JSON.stringify({ error: 'property.address required' }), { status: 400, headers: CORS });
+  }
+
+  // Saneamiento de strings — defensa contra inputs absurdos
+  if (typeof property.address !== 'string' || property.address.length > 500) {
+    return new Response(JSON.stringify({ error: 'property.address debe ser string < 500 chars' }), { status: 400, headers: CORS });
+  }
+  if (property.notes && (typeof property.notes !== 'string' || property.notes.length > 5000)) {
+    return new Response(JSON.stringify({ error: 'property.notes debe ser string < 5000 chars' }), { status: 400, headers: CORS });
+  }
+  if (Array.isArray(photos) && photos.length > 30) {
+    return new Response(JSON.stringify({ error: 'Demasiadas fotos (max 30)' }), { status: 400, headers: CORS });
+  }
+  // Validar URLs de fotos (no permitir javascript: ni data: que podrían explotar parsers)
+  for (const ph of photos) {
+    if (typeof ph?.url !== 'string' || !ph.url.match(/^https:\/\//i)) {
+      return new Response(JSON.stringify({ error: 'photos[].url debe ser https://...' }), { status: 400, headers: CORS });
+    }
   }
 
   // 1. Comparables: Tokko + ML + Argenprop + ZonaProp en paralelo

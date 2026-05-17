@@ -5,6 +5,7 @@
 import 'jsr:@supabase/functions-js/edge-runtime.d.ts';
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 import { requireAuth } from '../_shared/auth.ts';
+import { rateLimit } from '../_shared/rate_limit.ts';
 
 const ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY')!;
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
@@ -390,14 +391,34 @@ Deno.serve(async (req: Request) => {
   const authError = await requireAuth(req, cors);
   if (authError) return authError;
 
-  const body = await req.json() as { history?: ChatMessage[]; question: string; role?: string; user_email?: string };
-  if (!body.question?.trim()) {
+  // Rate limit: 20 requests/minuto por IP (asistente IA es caro)
+  const rl = await rateLimit(req, 'assistant-chat', 20, 60, cors);
+  if (rl) return rl;
+
+  // Saneamiento + validación de input (defensa contra payloads malformados,
+  // prompt-injection de gran volumen, historiales gigantes que drainen tokens)
+  let body: { history?: ChatMessage[]; question: string; role?: string; user_email?: string };
+  try {
+    body = await req.json();
+  } catch {
+    return new Response(JSON.stringify({ error: 'JSON inválido' }), { status: 400, headers: { ...cors, 'Content-Type': 'application/json' } });
+  }
+  const question = typeof body.question === 'string' ? body.question.trim() : '';
+  if (!question) {
     return new Response(JSON.stringify({ error: 'Falta la pregunta' }), { status: 400, headers: { ...cors, 'Content-Type': 'application/json' } });
+  }
+  if (question.length > 4000) {
+    return new Response(JSON.stringify({ error: 'Pregunta demasiado larga (max 4000 chars)' }), { status: 400, headers: { ...cors, 'Content-Type': 'application/json' } });
   }
   if (body.role !== 'admin') {
     return new Response(JSON.stringify({ error: 'Solo admin' }), { status: 403, headers: { ...cors, 'Content-Type': 'application/json' } });
   }
-  _currentUserEmail = body.user_email ?? 'leticia@turdogroup.com';
+  // Limitar tamaño del historial (evita prompts gigantes que drainen Claude)
+  if (Array.isArray(body.history) && body.history.length > 50) {
+    body.history = body.history.slice(-50);
+  }
+  body.question = question;
+  _currentUserEmail = typeof body.user_email === 'string' ? body.user_email : 'leticia@turdogroup.com';
 
   // Stream response al cliente
   const stream = new ReadableStream({

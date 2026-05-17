@@ -4,6 +4,7 @@
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { requireAuth } from '../_shared/auth.ts';
+import { rateLimit } from '../_shared/rate_limit.ts';
 
 const ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY')!;
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
@@ -123,6 +124,9 @@ Deno.serve(async (req) => {
   // Auth check: bloquear invocaciones anonimas (Claude API caro / abuso)
   const authError = await requireAuth(req, CORS);
   if (authError) return authError;
+
+  const rl = await rateLimit(req, 'qualify-lead', 30, 60, CORS);
+  if (rl) return rl;
 
   let body: { contact_id?: string; force?: boolean };
   try { body = await req.json(); }
