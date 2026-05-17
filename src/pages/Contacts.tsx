@@ -189,34 +189,37 @@ export default function Contacts() {
   };
 
   return (
-    <div className="flex flex-col h-full p-6 gap-6">
+    <div className="flex flex-col h-full p-4 sm:p-6 gap-4 sm:gap-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-white">Contactos</h1>
-          <p className="text-muted text-sm mt-0.5">
+          <h1 className="text-xl sm:text-2xl font-bold text-white">Contactos</h1>
+          <p className="text-muted text-xs sm:text-sm mt-0.5">
             {leads.length} contactos en total
             {isAdmin && unassignedCount > 0 && (
               <> · <span className="text-crimson font-semibold">{unassignedCount} sin asignar</span></>
             )}
           </p>
         </div>
-        <div className="flex gap-3">
+        <div className="flex gap-2 sm:gap-3">
           <input ref={fileRef} type="file" accept=".csv" onChange={handleImport} className="hidden" />
           <button
             onClick={() => fileRef.current?.click()}
             disabled={importing}
-            className="flex items-center gap-2 px-4 py-2.5 bg-bg-card border border-border rounded-xl text-sm text-white hover:bg-bg-hover transition-all disabled:opacity-50"
+            title="Importar CSV"
+            className="flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 sm:py-2.5 bg-bg-card border border-border rounded-xl text-xs sm:text-sm text-white hover:bg-bg-hover transition-all disabled:opacity-50 flex-1 sm:flex-initial justify-center"
           >
             <span>⬆</span>
-            {importing ? 'Importando...' : 'Importar CSV'}
+            <span className="hidden sm:inline">{importing ? 'Importando...' : 'Importar CSV'}</span>
+            <span className="sm:hidden">{importing ? '...' : 'CSV'}</span>
           </button>
           <button
             onClick={() => setShowCreate(true)}
-            className="flex items-center gap-2 px-4 py-2.5 bg-crimson hover:bg-crimson-light text-white text-sm font-semibold rounded-xl transition-all"
+            className="flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 sm:py-2.5 bg-crimson hover:bg-crimson-light text-white text-xs sm:text-sm font-semibold rounded-xl transition-all flex-1 sm:flex-initial justify-center whitespace-nowrap"
           >
             <span>+</span>
-            Crear contacto
+            <span className="hidden sm:inline">Crear contacto</span>
+            <span className="sm:hidden">Crear</span>
           </button>
         </div>
       </div>

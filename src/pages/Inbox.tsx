@@ -280,19 +280,20 @@ export default function Inbox() {
                 {selected.propertyTitle && <span className="text-muted text-xs truncate">{selected.propertyTitle}</span>}
               </div>
             </div>
-            <div className="flex items-center gap-2 flex-shrink-0">
-              <div className="hidden sm:block"><StatusBadge status={selected.status} /></div>
+            <div className="flex items-center gap-1 sm:gap-2 flex-shrink-0">
+              <div className="hidden md:block"><StatusBadge status={selected.status} /></div>
               <button
                 onClick={() => setShowReminder(true)}
                 title="Crear recordatorio"
                 aria-label="Crear recordatorio"
-                className="text-lg hover:scale-110 transition-transform p-1"
+                className="text-base sm:text-lg hover:scale-110 transition-transform p-1.5"
               >
                 🔔
               </button>
               <button
                 onClick={() => setShowAssign(true)}
-                className="text-xs bg-bg-input hover:bg-bg-hover border border-border rounded-lg px-3 py-1.5 text-gray-700 transition-all whitespace-nowrap"
+                title={assignedAgent ? `Asignado a ${assignedAgent.name}` : 'Asignar a vendedor'}
+                className="text-xs bg-bg-input hover:bg-bg-hover border border-border rounded-lg px-2 sm:px-3 py-1.5 text-gray-700 transition-all whitespace-nowrap max-w-[110px] truncate"
               >
                 {assignedAgent ? assignedAgent.name.split(' ')[0] : '+ Asignar'}
               </button>
@@ -301,7 +302,7 @@ export default function Inbox() {
                   onClick={() => setShowMerge(true)}
                   title="Unificar con otro contacto"
                   aria-label="Unificar con otro contacto"
-                  className="text-lg hover:scale-110 transition-transform p-1"
+                  className="text-base sm:text-lg hover:scale-110 transition-transform p-1.5"
                 >
                   🔗
                 </button>
@@ -373,50 +374,55 @@ export default function Inbox() {
                 <button onClick={() => setSendError(null)} className="ml-auto flex-shrink-0 text-red-400 hover:text-red-600">✕</button>
               </div>
             )}
-            <div className="flex gap-2 items-end">
-              <TemplatePicker
-                lead={selected}
-                agent={currentUser}
-                onPick={rendered => setReply(prev => prev ? `${prev}\n${rendered}` : rendered)}
-              />
-              <ReplySuggestions
-                lead={selected}
-                agent={currentUser}
-                onPick={text => setReply(text)}
-              />
-              <ClientPortalButton
-                lead={selected}
-                agent={currentUser}
-              />
-              <AttachMediaButton
-                contactId={selected.id}
-                agentId={currentUser.id}
-                channel={channelLabel(selected.channel)}
-                disabled={sending}
-                onSent={() => { void refreshLeads(); }}
-              />
-              <RecordVoiceButton
-                contactId={selected.id}
-                agentId={currentUser.id}
-                channel={channelLabel(selected.channel)}
-                disabled={sending}
-                onSent={() => { void refreshLeads(); }}
-              />
-              <textarea
-                value={reply}
-                onChange={e => { setReply(e.target.value); if (sendError) setSendError(null); }}
-                onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }}}
-                placeholder={`Responder por ${channelLabel(selected.channel)}...`}
-                rows={2}
-                className="flex-1 bg-bg-input border border-border rounded-xl px-4 py-3 text-sm text-white placeholder-muted outline-none focus:border-crimson resize-none"
-              />
-              <button
-                onClick={handleSend}
-                disabled={!reply.trim() || sending}
-                className="bg-crimson hover:bg-crimson-light text-white px-4 py-3 rounded-xl text-sm font-medium transition-all disabled:opacity-40"
-              >
-                {sending ? '...' : 'Enviar'}
-              </button>
+            {/* Botones de acción: arriba del textarea en mobile, al lado en desktop */}
+            <div className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-end">
+              <div className="flex gap-1.5 items-center overflow-x-auto sm:overflow-visible scrollbar-hide flex-shrink-0">
+                <TemplatePicker
+                  lead={selected}
+                  agent={currentUser}
+                  onPick={rendered => setReply(prev => prev ? `${prev}\n${rendered}` : rendered)}
+                />
+                <ReplySuggestions
+                  lead={selected}
+                  agent={currentUser}
+                  onPick={text => setReply(text)}
+                />
+                <ClientPortalButton
+                  lead={selected}
+                  agent={currentUser}
+                />
+                <AttachMediaButton
+                  contactId={selected.id}
+                  agentId={currentUser.id}
+                  channel={channelLabel(selected.channel)}
+                  disabled={sending}
+                  onSent={() => { void refreshLeads(); }}
+                />
+                <RecordVoiceButton
+                  contactId={selected.id}
+                  agentId={currentUser.id}
+                  channel={channelLabel(selected.channel)}
+                  disabled={sending}
+                  onSent={() => { void refreshLeads(); }}
+                />
+              </div>
+              <div className="flex gap-2 items-end flex-1 min-w-0">
+                <textarea
+                  value={reply}
+                  onChange={e => { setReply(e.target.value); if (sendError) setSendError(null); }}
+                  onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }}}
+                  placeholder={`Responder por ${channelLabel(selected.channel)}...`}
+                  rows={2}
+                  className="flex-1 min-w-0 bg-bg-input border border-border rounded-xl px-4 py-3 text-sm text-white placeholder-muted outline-none focus:border-crimson resize-none"
+                />
+                <button
+                  onClick={handleSend}
+                  disabled={!reply.trim() || sending}
+                  className="bg-crimson hover:bg-crimson-light text-white px-4 py-3 rounded-xl text-sm font-medium transition-all disabled:opacity-40 flex-shrink-0 min-w-[72px]"
+                >
+                  {sending ? '...' : 'Enviar'}
+                </button>
+              </div>
             </div>
           </div>
         </div>
