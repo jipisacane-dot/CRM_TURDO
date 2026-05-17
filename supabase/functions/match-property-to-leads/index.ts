@@ -3,6 +3,7 @@
 // Usa la función SQL fn_upsert_match para evaluar cada par (property, contact).
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { requireAuth } from '../_shared/auth.ts';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -17,6 +18,10 @@ const CORS = {
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { headers: CORS });
   if (req.method !== 'POST') return new Response('Method not allowed', { status: 405, headers: CORS });
+
+  // Auth check: bloquear invocaciones anonimas (Claude API caro / abuso)
+  const authError = await requireAuth(req, CORS);
+  if (authError) return authError;
 
   let body: { property_id?: string; contact_id?: string; min_score?: number };
   try { body = await req.json(); }

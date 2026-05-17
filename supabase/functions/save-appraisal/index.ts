@@ -2,6 +2,7 @@
 // Se usa cuando el agente confirma (eventualmente con precios editados) el resultado de appraise-property.
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { requireAuth } from '../_shared/auth.ts';
 
 const sb = createClient(
   Deno.env.get('SUPABASE_URL')!,
@@ -32,6 +33,10 @@ Deno.serve(async (req) => {
   if (!CORS) return new Response('Forbidden origin', { status: 403 });
   if (req.method === 'OPTIONS') return new Response(null, { headers: CORS });
   if (req.method !== 'POST') return new Response('Method not allowed', { status: 405, headers: CORS });
+
+  // Auth check: bloquear invocaciones anonimas (Claude API caro / abuso)
+  const authError = await requireAuth(req, CORS);
+  if (authError) return authError;
 
   let body: {
     property?: Record<string, unknown>;

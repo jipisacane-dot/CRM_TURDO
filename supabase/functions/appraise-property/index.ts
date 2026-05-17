@@ -5,6 +5,7 @@
 // 4) Retorna {suggested_price_low_usd, suggested_price_high_usd, comparables, ai_reasoning, market_summary, recommendations, estimated_sale_days}
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { requireAuth } from '../_shared/auth.ts';
 
 const ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY')!;
 const TOKKO_KEY = Deno.env.get('TOKKO_API_KEY') ?? '';
@@ -764,6 +765,10 @@ Deno.serve(async (req) => {
   if (!CORS) return new Response('Forbidden origin', { status: 403 });
   if (req.method === 'OPTIONS') return new Response(null, { headers: CORS });
   if (req.method !== 'POST') return new Response('Method not allowed', { status: 405, headers: CORS });
+
+  // Auth check: bloquea invocaciones anónimas (Claude API es caro)
+  const authError = await requireAuth(req, CORS);
+  if (authError) return authError;
 
   let body: {
     property?: PropertyInput;

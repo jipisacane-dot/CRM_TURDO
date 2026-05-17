@@ -3,6 +3,7 @@
 // actualiza contacts.current_stage_key + registra en contact_stage_changes (auto_detected=true).
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { requireAuth } from '../_shared/auth.ts';
 
 const ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY')!;
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
@@ -121,6 +122,10 @@ Devolvé JSON con la clasificación.`;
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { headers: CORS_HEADERS });
   if (req.method !== 'POST') return new Response('Method not allowed', { status: 405, headers: CORS_HEADERS });
+
+  // Auth check: bloquear invocaciones anonimas (Claude API caro / abuso)
+  const authError = await requireAuth(req, CORS_HEADERS);
+  if (authError) return authError;
 
   let body: { contact_id?: string; message_id?: string };
   try { body = await req.json(); }

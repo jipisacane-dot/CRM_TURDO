@@ -259,7 +259,8 @@ Deno.serve(async (req) => {
       if (phone) await supabase.from('contacts').update({ phone }).eq('id', contact_id);
     }
 
-    // Si hay media, evitar ManyChat (no soporta media bien) y usar Cloud API directo
+    // WhatsApp: ManyChat primero (flow probado), Cloud API fallback.
+    // Si hay media → Cloud API directo (ManyChat no soporta media bien).
     if (waMedia) {
       if (!phone || !WA_PHONE_NUMBER_ID) {
         method = 'failed';
@@ -269,14 +270,12 @@ Deno.serve(async (req) => {
         if (r.ok) { method = 'whatsapp_cloud'; ok = true; }
         else { errDetail = r.error ?? ''; outsideWindow = r.outsideWindow ?? false; }
       }
-    } else
-    // WhatsApp: try ManyChat flow (bypasses sendContent Messenger window check), fallback Cloud API
-    if (contact.channel_id) {
+    } else if (contact.channel_id) {
       const r = await sendManyChatWA(contact.channel_id, content);
       if (r.ok) { method = 'manychat'; ok = true; }
       else {
         errDetail = `mc: ${r.error}`;
-        // Always try Cloud API fallback regardless of window status
+        // Fallback Cloud API
         if (phone && WA_PHONE_NUMBER_ID) {
           const r2 = await sendWhatsApp(phone, content);
           if (r2.ok) { method = 'whatsapp_cloud'; ok = true; }

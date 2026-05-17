@@ -4,6 +4,7 @@
 // Cuando ML/web estén activas a fin de mes, conectamos las llamadas reales acá.
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { requireAuth } from '../_shared/auth.ts';
 
 const supabase = createClient(
   Deno.env.get('SUPABASE_URL')!,
@@ -41,6 +42,10 @@ Deno.serve(async (req) => {
   if (!CORS) return new Response('Forbidden origin', { status: 403 });
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
   if (req.method !== 'POST') {
+
+  // Auth check: bloquear invocaciones anonimas (Claude API caro / abuso)
+  const authError = await requireAuth(req, CORS);
+  if (authError) return authError;
     return new Response(JSON.stringify({ error: 'POST only' }), { status: 405, headers: { ...CORS, 'Content-Type': 'application/json' } });
   }
 
