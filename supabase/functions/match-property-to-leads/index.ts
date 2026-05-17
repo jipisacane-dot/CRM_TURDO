@@ -4,18 +4,15 @@
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { requireAuth } from '../_shared/auth.ts';
+import { buildCors } from '../_shared/cors.ts';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const sb = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-const CORS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-};
-
 Deno.serve(async (req) => {
+  const CORS = buildCors(req);
+  if (!CORS) return new Response('Forbidden origin', { status: 403 });
   if (req.method === 'OPTIONS') return new Response(null, { headers: CORS });
   if (req.method !== 'POST') return new Response('Method not allowed', { status: 405, headers: CORS });
 
