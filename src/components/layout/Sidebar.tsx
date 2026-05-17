@@ -254,17 +254,17 @@ export const MobileNav = () => {
   const MOBILE_NAV = visible.slice(0, 5);
   return (
     <nav
-      className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-xl border-t border-border"
+      className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white border-t border-border shadow-[0_-2px_12px_rgba(0,0,0,.04)]"
       style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
     >
-      <div className="flex">
+      <div className="flex h-14">
         {MOBILE_NAV.map(({ to, iconKey, label }) => (
           <NavLink
             key={to}
             to={to}
             end={to === '/'}
             className={({ isActive }) =>
-              `flex-1 flex flex-col items-center gap-0.5 py-2.5 text-[10px] font-medium transition-colors relative select-none ${
+              `flex-1 flex flex-col items-center justify-center gap-1 text-[10px] font-medium transition-colors relative select-none ${
                 isActive ? 'text-crimson' : 'text-muted active:text-[#0F172A]'
               }`
             }

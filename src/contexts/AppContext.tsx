@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, useCallback, useMemo, type ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef, type ReactNode } from 'react';
 import type { Lead, Agent } from '../types';
 import { AGENTS } from '../data/mock';
 import { db, supabase, type DBContact, type DBMessage, type DBReminder } from '../services/supabase';
@@ -90,6 +90,11 @@ function resolveBaseUser(authEmail: string | null) {
 
 export const AppProvider = ({ children }: { children: ReactNode }) => {
   const [leads, setLeads] = useState<Lead[]>([]);
+  const leadsRef = useRef<Lead[]>([]);
+  // Mantener leadsRef sincronizado con leads para que refreshLeads pueda
+  // chequear "isFirstLoad" sin depender de leads (que causaría re-creación
+  // del callback en cada cambio y rompería la subscripción de Realtime).
+  useEffect(() => { leadsRef.current = leads; }, [leads]);
   const [loading, setLoading] = useState(true);
   const [dueReminders, setDueReminders] = useState<DBReminder[]>([]);
   const [authEmail, setAuthEmail] = useState<string | null>(null);
@@ -135,17 +140,22 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     if (!sessionLoaded) return;
     // Si es vendedor pero todavía no resolvimos su dbId, esperar.
     if (baseUser.role === 'agent' && !agentDbId) return;
-    setLoading(true);
+
+    // CRÍTICO: solo mostrar "Cargando..." en el PRIMER load (cuando leads está vacío).
+    // En refreshes posteriores (polling, realtime, focus), mantener la lista visible
+    // y actualizar silenciosamente. Sino el user ve "Cargando..." cada 30s y la
+    // lista desaparece, haciendo imposible interactuar.
+    const isFirstLoad = leadsRef.current.length === 0;
+    if (isFirstLoad) setLoading(true);
+
     try {
-      // Vendedores solo ven sus contactos asignados (filtro server-side por UUID real).
-      // Admin (Leticia) ve todo.
       const opts = baseUser.role === 'agent' && agentDbId ? { agentId: agentDbId } : undefined;
       const contacts = await db.contacts.listWithMessages(opts);
       setLeads(contacts.map(c => toLead(c, c.messages)));
     } catch (e) {
       console.error('Error cargando leads:', e);
     } finally {
-      setLoading(false);
+      if (isFirstLoad) setLoading(false);
     }
   }, [sessionLoaded, agentDbId, baseUser.role]);
 
@@ -292,17 +302,19 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
 
     connect();
 
-    // Polling safety net: refresh every 30s if not healthy
+    // Polling safety net: refresh cada 60s SOLO si realtime no está healthy.
+    // Antes 30s causaba overhead innecesario (lista de 1576 items se re-renderiza).
     const interval = setInterval(() => {
       if (!healthy) refreshLeads();
-    }, 30000);
+    }, 60000);
 
-    // Refresh immediately when user comes back to tab
+    // Refresh inmediato al volver a la tab (solo si realtime está roto)
     const onFocus = () => { if (!healthy) refreshLeads(); };
     window.addEventListener('focus', onFocus);
-    document.addEventListener('visibilitychange', () => {
+    const onVis = () => {
       if (document.visibilityState === 'visible' && !healthy) refreshLeads();
-    });
+    };
+    document.addEventListener('visibilitychange', onVis);
 
     return () => {
       unmounted = true;
@@ -310,6 +322,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       if (currentChannel) supabase.removeChannel(currentChannel);
       clearInterval(interval);
       window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVis);
     };
   }, [refreshLeads]);
 
