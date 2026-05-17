@@ -15,8 +15,8 @@ const META_APP_SECRET = Deno.env.get('META_APP_SECRET') ?? '';
 
 async function verifyMetaSignature(req: Request, rawBody: string): Promise<boolean> {
   if (!META_APP_SECRET) {
-    console.warn('META_APP_SECRET no configurado — saltando verificación HMAC');
-    return true;
+    console.error('META_APP_SECRET no configurado — rechazando webhook por seguridad');
+    return false;
   }
   const sigHeader = req.headers.get('x-hub-signature-256');
   if (!sigHeader?.startsWith('sha256=')) return false;

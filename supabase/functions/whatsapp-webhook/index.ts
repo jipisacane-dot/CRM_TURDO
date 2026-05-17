@@ -11,12 +11,12 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const META_APP_SECRET = Deno.env.get('META_APP_SECRET') ?? '';
 
 // Valida firma HMAC-SHA256 que Meta envía en x-hub-signature-256.
-// Si META_APP_SECRET no está configurado, pasa con warning para no romper webhooks
-// (modo gracia hasta que el secret se cargue en Supabase secrets).
+// FAIL-CLOSED: si META_APP_SECRET no está configurado, RECHAZA todo
+// (previene spoofing — antes era fail-open por modo gracia inicial).
 async function verifyMetaSignature(req: Request, rawBody: string): Promise<boolean> {
   if (!META_APP_SECRET) {
-    console.warn('META_APP_SECRET no configurado — saltando verificación HMAC');
-    return true;
+    console.error('META_APP_SECRET no configurado — rechazando webhook por seguridad');
+    return false;
   }
   const sigHeader = req.headers.get('x-hub-signature-256');
   if (!sigHeader?.startsWith('sha256=')) return false;
