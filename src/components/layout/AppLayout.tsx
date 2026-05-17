@@ -48,13 +48,22 @@ export const AppLayout = ({ children }: { children: ReactNode }) => {
   }
 
   return (
-    <div className="flex h-[100dvh] bg-bg-main overflow-hidden">
+    <div className="flex h-full w-full bg-bg-main overflow-hidden">
       <Sidebar />
       <main
         key={location.pathname}
-        className="flex-1 min-w-0 h-full overflow-y-auto pt-[env(safe-area-inset-top)] md:pt-0 pb-[calc(5rem+env(safe-area-inset-bottom))] md:pb-0 page-fade-enter"
+        className="flex-1 min-w-0 h-full flex flex-col overflow-hidden page-fade-enter"
       >
-        {children}
+        {/* Spacer notch/Dynamic Island — fuera del scroll, mismo color de fondo */}
+        <div
+          className="md:hidden flex-shrink-0 bg-bg-main"
+          style={{ height: 'env(safe-area-inset-top)' }}
+          aria-hidden="true"
+        />
+        {/* Contenedor scrolleable: padding-bottom = altura tab bar + safe area */}
+        <div className="flex-1 overflow-y-auto pb-[calc(4.5rem+env(safe-area-inset-bottom))] md:pb-0">
+          {children}
+        </div>
       </main>
       <MobileNav />
       <GlobalSearch />

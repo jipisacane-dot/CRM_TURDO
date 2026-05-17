@@ -135,7 +135,7 @@ export default function Inbox() {
 
   return (
     <div
-      className="flex h-[calc(100dvh-5rem-env(safe-area-inset-bottom))] md:h-screen overflow-hidden"
+      className="flex h-full overflow-hidden"
       style={{ background: '#F8F9FB' }}
     >
       {/* Conversation list */}

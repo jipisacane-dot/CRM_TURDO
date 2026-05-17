@@ -11,7 +11,10 @@
   --bg-card: #FFFFFF;
 }
 
-/* ── Bloquear bounce / pull-to-refresh / overscroll blanco ── */
+/* ── App-shell pattern: el viewport NO scrollea (solo el contenido interno).
+   Esto evita el "rebote" donde Safari muestra/oculta la URL bar al hacer scroll
+   y el layout salta. La app se comporta como nativa: status bar siempre fija,
+   tab bar siempre fija, solo el contenido entre medio scrollea. ── */
 html, body {
   background: var(--bg-main) !important;
   color: #0F172A !important;
@@ -19,12 +22,21 @@ html, body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   margin: 0;
-  /* Evita el bounce de iOS y el pull-to-refresh de Chrome Android */
+  padding: 0;
+  /* Bloquear scroll y bounce del viewport: solo scrollea el contenedor interno */
   overscroll-behavior: none;
-  /* Evita que se desplace horizontalmente en mobile cuando hay overflow oculto */
-  overflow-x: hidden;
-  /* Color de fondo en TODA la viewport (incluso debajo del notch / safe-area) */
-  min-height: 100%;
+  overflow: hidden;
+  /* Tamaño fijo al viewport (dynamic viewport en mobile para que respete URL bar) */
+  height: 100dvh;
+  width: 100vw;
+  /* Color uniforme detrás de safe-area */
+  background-color: var(--bg-main);
+}
+
+#root {
+  height: 100dvh;
+  width: 100vw;
+  overflow: hidden;
 }
 
 html {
