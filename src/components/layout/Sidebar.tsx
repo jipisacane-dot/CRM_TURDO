@@ -88,7 +88,8 @@ const NAV_GROUPS: NavGroup[] = [
     label: 'Administración',
     items: [
       { to: '/payroll',      iconKey: 'money',      label: 'Liquidación',  adminOnly: true },
-      { to: '/finanzas',     iconKey: 'finanzas',   label: 'Finanzas',     adminOnly: true },
+      { to: '/finanzas',     iconKey: 'finanzas',   label: 'Gastos negocio', adminOnly: true },
+      { to: '/mis-finanzas', iconKey: 'wallet',     label: 'Mis finanzas', adminOnly: true },
       { to: '/vencimientos', iconKey: 'alarm',      label: 'Vencimientos', adminOnly: true },
       { to: '/audit',        iconKey: 'finanzas',   label: 'Audit log',    adminOnly: true },
     ],

@@ -33,6 +33,7 @@ const AppraisalPublic = lazy(() => import('./pages/AppraisalPublic'));
 const Payroll = lazy(() => import('./pages/Payroll'));
 const MyCommissions = lazy(() => import('./pages/MyCommissions'));
 const Finanzas = lazy(() => import('./pages/Finanzas'));
+const MisFinanzas = lazy(() => import('./pages/MisFinanzas'));
 const Vencimientos = lazy(() => import('./pages/Vencimientos'));
 
 // Skeleton de loading que matchea el layout general (no flash blanco)
@@ -75,6 +76,7 @@ export default function App() {
               <Route path="/payroll"     element={<AppLayout><Payroll /></AppLayout>} />
               <Route path="/my-commissions" element={<AppLayout><MyCommissions /></AppLayout>} />
               <Route path="/finanzas"    element={<AppLayout><Finanzas /></AppLayout>} />
+              <Route path="/mis-finanzas" element={<AppLayout><MisFinanzas /></AppLayout>} />
               <Route path="/vencimientos" element={<AppLayout><Vencimientos /></AppLayout>} />
               <Route path="/team"        element={<AppLayout><Team /></AppLayout>} />
               <Route path="/calendar"    element={<AppLayout><Calendar /></AppLayout>} />
