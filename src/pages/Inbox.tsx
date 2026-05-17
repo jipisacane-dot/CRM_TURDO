@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import { useApp } from '../contexts/AppContext';
 import { AGENTS } from '../data/mock';
 import { ChannelIcon, channelLabel } from '../components/ui/ChannelIcon';
@@ -93,14 +93,24 @@ export default function Inbox() {
   const isAdmin = currentUser.role === 'admin';
   // Vendedores filtran por currentUser.dbId (UUID real de DB), NO por currentUser.id (mock string del login).
   // Si dbId todavía no resolvió, lista vacía (evita mostrar leads de otros agentes brevemente).
-  const scope = isAdmin ? leads : leads.filter(l => currentUser.dbId && l.assignedTo === currentUser.dbId);
+  // Memoizado para evitar re-filtrado en cada render (1576 items × cada keystroke = lag).
+  const filtered = useMemo(() => {
+    const scope = isAdmin ? leads : leads.filter(l => currentUser.dbId && l.assignedTo === currentUser.dbId);
+    const q = search.toLowerCase();
+    return scope
+      .filter(l => channelFilter === 'all' || l.channel === channelFilter)
+      .filter(l => qualityFilter === 'all' ||
+        (qualityFilter === 'unrated' ? !l.quality_label : l.quality_label === qualityFilter))
+      .filter(l => !q || l.name.toLowerCase().includes(q) || (l.propertyTitle ?? '').toLowerCase().includes(q))
+      .sort((a, b) => new Date(b.lastActivity).getTime() - new Date(a.lastActivity).getTime());
+  }, [leads, isAdmin, currentUser.dbId, channelFilter, qualityFilter, search]);
 
-  const filtered = scope
-    .filter(l => channelFilter === 'all' || l.channel === channelFilter)
-    .filter(l => qualityFilter === 'all' ||
-      (qualityFilter === 'unrated' ? !l.quality_label : l.quality_label === qualityFilter))
-    .filter(l => !search || l.name.toLowerCase().includes(search.toLowerCase()) || (l.propertyTitle ?? '').toLowerCase().includes(search.toLowerCase()))
-    .sort((a, b) => new Date(b.lastActivity).getTime() - new Date(a.lastActivity).getTime());
+  // Renderizado incremental: empezamos mostrando 80, cargamos más al scrollear.
+  // 1576 items renderizando de una sola vez bloquea el main thread y los tabs
+  // tardan en responder. 80 es suficiente para llenar la pantalla y ser fluido.
+  const [visibleCount, setVisibleCount] = useState(80);
+  useEffect(() => { setVisibleCount(80); }, [channelFilter, qualityFilter, search]);
+  const visibleLeads = useMemo(() => filtered.slice(0, visibleCount), [filtered, visibleCount]);
 
   const selected = selectedId ? (leads.find(l => l.id === selectedId) ?? null) : null;
 
@@ -196,12 +206,21 @@ export default function Inbox() {
           </div>
         </div>
 
-        <div className="flex-1 min-h-0 overflow-y-auto">
+        <div
+          className="flex-1 min-h-0 overflow-y-auto"
+          onScroll={(e) => {
+            const el = e.currentTarget;
+            // Si llegamos cerca del fondo, cargar más items (paginación virtual)
+            if (el.scrollHeight - el.scrollTop - el.clientHeight < 400 && visibleCount < filtered.length) {
+              setVisibleCount(c => Math.min(c + 80, filtered.length));
+            }
+          }}
+        >
           {loading && <div className="text-center text-muted py-12 text-sm animate-pulse">Cargando conversaciones...</div>}
           {!loading && filtered.length === 0 && (
             <div className="text-center text-muted py-12 text-sm">No hay conversaciones</div>
           )}
-          {filtered.map(lead => {
+          {visibleLeads.map(lead => {
             const unread = unreadInLead(lead);
             const last = lead.messages[lead.messages.length - 1];
             return (
@@ -209,6 +228,7 @@ export default function Inbox() {
                 key={lead.id}
                 onClick={() => { setSelectedId(lead.id); }}
                 className={`flex gap-3 p-4 border-b border-border cursor-pointer transition-all hover:bg-bg-hover ${selectedId === lead.id ? 'bg-bg-hover border-l-2 border-l-crimson' : ''}`}
+                style={{ contain: 'layout style' }}
               >
                 <div className="relative flex-shrink-0">
                   <LeadAvatar lead={lead} size="md" />
@@ -245,6 +265,11 @@ export default function Inbox() {
               </div>
             );
           })}
+          {visibleCount < filtered.length && (
+            <div className="text-center py-4 text-muted text-xs">
+              Mostrando {visibleCount} de {filtered.length} · scrolleá para ver más
+            </div>
+          )}
         </div>
       </div>
 

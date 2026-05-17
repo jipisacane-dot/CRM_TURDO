@@ -11,47 +11,42 @@
   --bg-card: #FFFFFF;
 }
 
-/* ── App-shell pattern: el viewport NO scrollea (solo el contenido interno).
-   Esto evita el "rebote" donde Safari muestra/oculta la URL bar al hacer scroll
-   y el layout salta. La app se comporta como nativa: status bar siempre fija,
-   tab bar siempre fija, solo el contenido entre medio scrollea. ── */
-html, body {
+/* ── App-shell pattern AGRESIVO: position fixed garantiza que el contenedor
+   raíz ocupe EXACTAMENTE el viewport visible (sin más ni menos), sin importar
+   cómo Safari/Chrome muestren/oculten sus UI bars. La tab bar queda SIEMPRE
+   pegada al bottom del área visible real. ── */
+html {
   background: var(--bg-main) !important;
+  -webkit-tap-highlight-color: transparent;
+}
+html, body {
+  margin: 0;
+  padding: 0;
   color: #0F172A !important;
   font-family: 'Inter', system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  margin: 0;
-  padding: 0;
-  /* Bloquear scroll y bounce del viewport: solo scrollea el contenedor interno */
   overscroll-behavior: none;
-  overflow: hidden;
-  /* Tamaño fijo al viewport (dynamic viewport en mobile para que respete URL bar) */
-  height: 100dvh;
-  width: 100vw;
-  /* Color uniforme detrás de safe-area */
-  background-color: var(--bg-main);
 }
-
-#root {
-  height: 100dvh;
-  width: 100vw;
-  overflow: hidden;
-}
-
-html {
-  /* Cuando se hace pinch-zoom o el usuario se mueve más allá del contenido,
-     el background queda del color correcto, no blanco */
-  background-color: var(--bg-main);
-}
-
 body {
-  /* En iOS Safari, durante el bounce el body asoma; lo matcheamos al fondo */
+  /* Fixed inset: el body OCUPA exactamente el viewport visible.
+     Garantiza que la tab bar con position:fixed bottom:0 esté pegada
+     al fondo REAL sin gap blanco, en cualquier browser (Safari, Chrome iOS, PWA). */
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
   background-color: var(--bg-main);
-  /* Sin selección accidental al hacer doble tap o long press en UI */
   -webkit-user-select: none;
   -webkit-touch-callout: none;
   user-select: none;
+}
+
+#root {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  /* Layer de composición separado para mejor rendering en mobile */
+  isolation: isolate;
 }
 
 /* Permitir selección en contenido textual y inputs */
@@ -62,12 +57,7 @@ input, textarea, [contenteditable], .selectable, p, span, h1, h2, h3, h4, h5, h6
 
 * { box-sizing: border-box; }
 
-/* ── Tap delay + highlight ──────────────────────────────────
-   - touch-action: manipulation elimina el 300ms tap-delay
-   - tap-highlight-color: transparent saca el flash gris al tocar (estilo nativo) */
-html {
-  -webkit-tap-highlight-color: transparent;
-}
+/* Tap behavior — sin delay de 300ms ni flash gris */
 a, button, [role="button"], input, select, textarea, label, [data-tappable] {
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
@@ -78,15 +68,6 @@ a, button, [role="button"], input, select, textarea, label, [data-tappable] {
   button, [role="button"], a {
     min-height: 36px;
   }
-}
-
-/* ── Layout root: 100dvh para que respete el chrome del browser ── */
-#root {
-  width: 100%;
-  /* dvh = dynamic viewport height: tiene en cuenta la barra dinámica de iOS/Chrome */
-  min-height: 100vh;
-  min-height: 100dvh;
-  background: var(--bg-main);
 }
 
 /* ── Force background classes regardless of Tailwind cache ── */
