@@ -11,10 +11,12 @@
   --bg-card: #FFFFFF;
 }
 
-/* ── App-shell pattern AGRESIVO: position fixed garantiza que el contenedor
-   raíz ocupe EXACTAMENTE el viewport visible (sin más ni menos), sin importar
-   cómo Safari/Chrome muestren/oculten sus UI bars. La tab bar queda SIEMPRE
-   pegada al bottom del área visible real. ── */
+/* ── App-shell pattern: app nativa ──────────────────────────────
+   - html, body fixed inset 0: ocupan exactamente el viewport visible
+   - 100svh fallback: small viewport (cuando todas las UI bars están visibles)
+   - Background blanco se extiende debajo de la safe-area para que el "gap"
+     de la home indicator de iPhone se vea como tab bar, no espacio muerto.
+*/
 html {
   background: var(--bg-main) !important;
   -webkit-tap-highlight-color: transparent;
@@ -29,9 +31,6 @@ html, body {
   overscroll-behavior: none;
 }
 body {
-  /* Fixed inset: el body OCUPA exactamente el viewport visible.
-     Garantiza que la tab bar con position:fixed bottom:0 esté pegada
-     al fondo REAL sin gap blanco, en cualquier browser (Safari, Chrome iOS, PWA). */
   position: fixed;
   inset: 0;
   overflow: hidden;
@@ -45,8 +44,35 @@ body {
   height: 100%;
   width: 100%;
   overflow: hidden;
-  /* Layer de composición separado para mejor rendering en mobile */
   isolation: isolate;
+}
+
+/* Tab bar mobile: el bg se extiende hacia abajo con un pseudo-element para
+   tapar cualquier "espacio muerto" debajo de la nav (Chrome iOS toolbar,
+   home indicator, etc.) */
+.mobile-nav {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 40;
+  background: #FFFFFF;
+  border-top: 1px solid #E5E7EB;
+  box-shadow: 0 -2px 12px rgba(0,0,0,.04);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.mobile-nav::after {
+  /* Pseudo-element que extiende el bg hacia ABAJO del viewport visible.
+     Si por alguna razón el browser muestra más espacio debajo del bottom,
+     este pseudo lo cubre con el mismo color blanco del tab bar. */
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  height: 200px;
+  background: #FFFFFF;
+  pointer-events: none;
 }
 
 /* Permitir selección en contenido textual y inputs */

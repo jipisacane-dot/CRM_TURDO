@@ -1,4 +1,5 @@
-import { useState, useRef, useEffect, useMemo } from 'react';
+import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import { InboxItem } from '../components/InboxItem';
 import { useApp } from '../contexts/AppContext';
 import { AGENTS } from '../data/mock';
 import { ChannelIcon, channelLabel } from '../components/ui/ChannelIcon';
@@ -16,8 +17,7 @@ import QualityBadge, { QualityFilter } from '../components/ui/QualityBadge';
 import MessageMedia from '../components/ui/MessageMedia';
 import { pipelineStagesApi, pipelineApi, type PipelineStage } from '../services/pipeline';
 import type { Channel, Lead } from '../types';
-import { formatDistanceToNow, format } from 'date-fns';
-import { es } from 'date-fns/locale';
+import { format } from 'date-fns';
 
 function LeadAvatar({ lead, size = 'md' }: { lead: Lead; size?: 'sm' | 'md' }) {
   const [imgError, setImgError] = useState(false);
@@ -105,12 +105,31 @@ export default function Inbox() {
       .sort((a, b) => new Date(b.lastActivity).getTime() - new Date(a.lastActivity).getTime());
   }, [leads, isAdmin, currentUser.dbId, channelFilter, qualityFilter, search]);
 
-  // Renderizado incremental: empezamos mostrando 80, cargamos más al scrollear.
-  // 1576 items renderizando de una sola vez bloquea el main thread y los tabs
-  // tardan en responder. 80 es suficiente para llenar la pantalla y ser fluido.
-  const [visibleCount, setVisibleCount] = useState(80);
-  useEffect(() => { setVisibleCount(80); }, [channelFilter, qualityFilter, search]);
+  // Renderizado incremental con IntersectionObserver: empezamos con 30 items
+  // (suficientes para llenar pantalla mobile), cargamos +30 cuando el sentinel
+  // entra en vista. Mucho más eficiente que onScroll porque NO dispara en cada
+  // pixel de scroll, solo cuando el sentinel cruza el viewport.
+  const [visibleCount, setVisibleCount] = useState(30);
+  useEffect(() => { setVisibleCount(30); }, [channelFilter, qualityFilter, search]);
   const visibleLeads = useMemo(() => filtered.slice(0, visibleCount), [filtered, visibleCount]);
+  const sentinelRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (visibleCount >= filtered.length) return;
+    const sentinel = sentinelRef.current;
+    if (!sentinel) return;
+    const obs = new IntersectionObserver((entries) => {
+      if (entries[0].isIntersecting) {
+        setVisibleCount(c => Math.min(c + 30, filtered.length));
+      }
+    }, { rootMargin: '300px' });
+    obs.observe(sentinel);
+    return () => obs.disconnect();
+  }, [visibleCount, filtered.length]);
+
+  // Callback memoizado para que React.memo en InboxItem funcione
+  const handleSelectLead = useCallback((id: string) => setSelectedId(id), []);
+  const unreadInLead = useCallback((lead: typeof leads[number]) =>
+    lead.messages.filter(m => !m.read && m.direction === 'in').length, []);
 
   const selected = selectedId ? (leads.find(l => l.id === selectedId) ?? null) : null;
 
@@ -138,8 +157,6 @@ export default function Inbox() {
       }
     }
   };
-
-  const unreadInLead = (lead: Lead) => lead.messages.filter(m => !m.read && m.direction === 'in').length;
 
   const assignedAgent = selected?.assignedTo ? AGENTS.find(a => a.id === selected.assignedTo) : null;
 
@@ -206,68 +223,23 @@ export default function Inbox() {
           </div>
         </div>
 
-        <div
-          className="flex-1 min-h-0 overflow-y-auto"
-          onScroll={(e) => {
-            const el = e.currentTarget;
-            // Si llegamos cerca del fondo, cargar más items (paginación virtual)
-            if (el.scrollHeight - el.scrollTop - el.clientHeight < 400 && visibleCount < filtered.length) {
-              setVisibleCount(c => Math.min(c + 80, filtered.length));
-            }
-          }}
-        >
+        <div className="flex-1 min-h-0 overflow-y-auto">
           {loading && <div className="text-center text-muted py-12 text-sm animate-pulse">Cargando conversaciones...</div>}
           {!loading && filtered.length === 0 && (
             <div className="text-center text-muted py-12 text-sm">No hay conversaciones</div>
           )}
-          {visibleLeads.map(lead => {
-            const unread = unreadInLead(lead);
-            const last = lead.messages[lead.messages.length - 1];
-            return (
-              <div
-                key={lead.id}
-                onClick={() => { setSelectedId(lead.id); }}
-                className={`flex gap-3 p-4 border-b border-border cursor-pointer transition-all hover:bg-bg-hover ${selectedId === lead.id ? 'bg-bg-hover border-l-2 border-l-crimson' : ''}`}
-                style={{ contain: 'layout style' }}
-              >
-                <div className="relative flex-shrink-0">
-                  <LeadAvatar lead={lead} size="md" />
-                  <div className="absolute -bottom-0.5 -right-0.5">
-                    <ChannelIcon channel={lead.channel} size="sm" />
-                  </div>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between gap-1">
-                    <div className="flex items-center gap-1.5 min-w-0">
-                      <span className={`text-sm font-medium truncate ${unread > 0 ? 'text-white' : 'text-gray-300'}`}>{lead.name}</span>
-                      <QualityBadge lead={lead} size="sm" />
-                    </div>
-                    <span className="text-muted text-[10px] flex-shrink-0">{formatDistanceToNow(new Date(lead.lastActivity), { locale: es, addSuffix: false })}</span>
-                  </div>
-                  {(lead.phone || lead.email) && (
-                    <div className="text-muted text-[10px] font-mono truncate mt-0.5">
-                      {lead.phone || lead.email}
-                    </div>
-                  )}
-                  <div className="flex items-center gap-1 mt-0.5">
-                    <ChannelIcon channel={lead.channel} size="sm" />
-                    {lead.assignedTo ? (
-                      <span className="text-muted text-xs truncate">{AGENTS.find(a => a.id === lead.assignedTo)?.name.split(' ')[0]}</span>
-                    ) : (
-                      <span className="text-crimson-bright text-xs">Sin asignar</span>
-                    )}
-                  </div>
-                  {last && <div className={`text-xs truncate mt-0.5 ${unread > 0 ? 'text-gray-300' : 'text-muted'}`}>{last.direction === 'out' ? '↪ ' : ''}{last.content}</div>}
-                </div>
-                {unread > 0 && (
-                  <span className="bg-crimson-bright text-white text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center flex-shrink-0 self-start mt-1">{unread}</span>
-                )}
-              </div>
-            );
-          })}
+          {visibleLeads.map(lead => (
+            <InboxItem
+              key={lead.id}
+              lead={lead}
+              isSelected={selectedId === lead.id}
+              unread={unreadInLead(lead)}
+              onSelect={handleSelectLead}
+            />
+          ))}
           {visibleCount < filtered.length && (
-            <div className="text-center py-4 text-muted text-xs">
-              Mostrando {visibleCount} de {filtered.length} · scrolleá para ver más
+            <div ref={sentinelRef} className="text-center py-4 text-muted text-xs">
+              Cargando más ({visibleCount}/{filtered.length})...
             </div>
           )}
         </div>
