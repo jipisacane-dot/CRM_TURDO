@@ -113,39 +113,83 @@ async function sendFacebook(psid: string, text: string, media?: MetaMediaArgs) {
   return { ok: true };
 }
 
-const MANYCHAT_WA_FLOW_NS = Deno.env.get('MANYCHAT_WA_FLOW_NS') ?? '';
-const MANYCHAT_WA_FIELD_ID = 14515582; // crm_reply custom field
+// Flow namespaces — uno por tipo de contenido. El de texto es el original.
+const MANYCHAT_WA_FLOW_NS       = Deno.env.get('MANYCHAT_WA_FLOW_NS')       ?? ''; // texto solo (existing)
+const MANYCHAT_WA_FLOW_NS_IMAGE = Deno.env.get('MANYCHAT_WA_FLOW_NS_IMAGE') ?? '';
+const MANYCHAT_WA_FLOW_NS_AUDIO = Deno.env.get('MANYCHAT_WA_FLOW_NS_AUDIO') ?? '';
+const MANYCHAT_WA_FLOW_NS_VIDEO = Deno.env.get('MANYCHAT_WA_FLOW_NS_VIDEO') ?? '';
+const MANYCHAT_WA_FLOW_NS_FILE  = Deno.env.get('MANYCHAT_WA_FLOW_NS_FILE')  ?? '';
 
-// ── ManyChat WhatsApp via flow ────────────────────────────────────────────────
-// sendContent checks Messenger last_interaction (null for WA-only subscribers).
-// Workaround: set crm_reply field via setCustomField then trigger the WA reply flow.
-async function sendManyChatWA(subscriberId: string, text: string): Promise<{ ok: boolean; error?: string; outsideWindow?: boolean }> {
-  if (!MANYCHAT_WA_FLOW_NS) return { ok: false, error: 'MANYCHAT_WA_FLOW_NS not configured' };
+const MANYCHAT_WA_FIELD_ID = 14515582; // crm_reply (text)
+const MANYCHAT_WA_MEDIA_URL_FIELD_ID     = Number(Deno.env.get('MANYCHAT_WA_MEDIA_URL_FIELD_ID')     ?? '0');
+const MANYCHAT_WA_MEDIA_CAPTION_FIELD_ID = Number(Deno.env.get('MANYCHAT_WA_MEDIA_CAPTION_FIELD_ID') ?? '0');
 
-  // Step 1: set the crm_reply custom field using setCustomField endpoint
-  const setResp = await fetch('https://api.manychat.com/fb/subscriber/setCustomField', {
+interface ManyChatWAMediaArgs { url: string; type: 'image' | 'video' | 'audio' | 'document'; caption?: string }
+
+function flowNsForMedia(type: ManyChatWAMediaArgs['type']): string {
+  switch (type) {
+    case 'image':    return MANYCHAT_WA_FLOW_NS_IMAGE;
+    case 'audio':    return MANYCHAT_WA_FLOW_NS_AUDIO;
+    case 'video':    return MANYCHAT_WA_FLOW_NS_VIDEO;
+    case 'document': return MANYCHAT_WA_FLOW_NS_FILE;
+  }
+}
+
+async function setMCField(subscriberId: number, fieldId: number, value: string): Promise<{ ok: boolean; error?: string }> {
+  const resp = await fetch('https://api.manychat.com/fb/subscriber/setCustomField', {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${MANYCHAT_KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ subscriber_id: Number(subscriberId), field_id: MANYCHAT_WA_FIELD_ID, field_value: text }),
+    body: JSON.stringify({ subscriber_id: subscriberId, field_id: fieldId, field_value: value }),
   });
-  const rawSet = await setResp.text();
-  let setResult: Record<string, unknown>;
-  try { setResult = JSON.parse(rawSet); } catch { setResult = { status: 'error', message: rawSet.slice(0, 100) }; }
-  console.log(`ManyChat setCustomField status=${setResp.status} body=${JSON.stringify(setResult)}`);
-  if (!setResp.ok || setResult?.status !== 'success') {
-    return { ok: false, error: `setField: ${setResult?.message ?? JSON.stringify(setResult)}` };
+  const raw = await resp.text();
+  let result: Record<string, unknown>;
+  try { result = JSON.parse(raw); } catch { result = { status: 'error', message: raw.slice(0, 100) }; }
+  console.log(`ManyChat setField id=${fieldId} status=${resp.status} value="${value.slice(0,40)}"`);
+  if (!resp.ok || result?.status !== 'success') {
+    return { ok: false, error: String(result?.message ?? JSON.stringify(result)) };
+  }
+  return { ok: true };
+}
+
+// ── ManyChat WhatsApp via flow ────────────────────────────────────────────────
+// Si hay media → setea campos media + dispara flow específico del tipo.
+// Si no hay media → setea solo crm_reply + dispara flow de texto.
+async function sendManyChatWA(subscriberId: string, text: string, media?: ManyChatWAMediaArgs): Promise<{ ok: boolean; error?: string; outsideWindow?: boolean }> {
+  const subId = Number(subscriberId);
+  let flowNs: string;
+
+  if (media) {
+    flowNs = flowNsForMedia(media.type);
+    if (!flowNs) return { ok: false, error: `MANYCHAT_WA_FLOW_NS_${media.type.toUpperCase()} not configured` };
+    if (!MANYCHAT_WA_MEDIA_URL_FIELD_ID) return { ok: false, error: 'MANYCHAT_WA_MEDIA_URL_FIELD_ID not configured' };
+
+    // Setear URL del media
+    const r1 = await setMCField(subId, MANYCHAT_WA_MEDIA_URL_FIELD_ID, media.url);
+    if (!r1.ok) return { ok: false, error: `setField media_url: ${r1.error}` };
+
+    // Caption opcional (solo image/video)
+    if (MANYCHAT_WA_MEDIA_CAPTION_FIELD_ID && (media.type === 'image' || media.type === 'video')) {
+      await setMCField(subId, MANYCHAT_WA_MEDIA_CAPTION_FIELD_ID, media.caption ?? '');
+    }
+  } else {
+    flowNs = MANYCHAT_WA_FLOW_NS;
+    if (!flowNs) return { ok: false, error: 'MANYCHAT_WA_FLOW_NS not configured' };
+
+    // Setear texto en crm_reply
+    const r1 = await setMCField(subId, MANYCHAT_WA_FIELD_ID, text);
+    if (!r1.ok) return { ok: false, error: `setField crm_reply: ${r1.error}` };
   }
 
-  // Step 2: trigger the WA reply flow
+  // Trigger flow
   const flowResp = await fetch('https://api.manychat.com/fb/sending/sendFlow', {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${MANYCHAT_KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ subscriber_id: Number(subscriberId), flow_ns: MANYCHAT_WA_FLOW_NS }),
+    body: JSON.stringify({ subscriber_id: subId, flow_ns: flowNs }),
   });
   const rawFlow = await flowResp.text();
   let flowResult: Record<string, unknown>;
   try { flowResult = JSON.parse(rawFlow); } catch { flowResult = { status: 'error', message: rawFlow.slice(0, 100) }; }
-  console.log(`ManyChat sendFlow status=${flowResp.status} body=${JSON.stringify(flowResult)}`);
+  console.log(`ManyChat sendFlow ns=${flowNs} type=${media?.type ?? 'text'} status=${flowResp.status} body=${JSON.stringify(flowResult)}`);
   if (flowResp.ok && flowResult?.status === 'success') return { ok: true };
   return { ok: false, error: `sendFlow: ${flowResult?.message ?? JSON.stringify(flowResult)}` };
 }
@@ -259,38 +303,36 @@ Deno.serve(async (req) => {
       if (phone) await supabase.from('contacts').update({ phone }).eq('id', contact_id);
     }
 
-    // WhatsApp: ManyChat primero (flow probado), Cloud API fallback.
-    // Si hay media → Cloud API directo (ManyChat no soporta media bien).
-    if (waMedia) {
-      if (!phone || !WA_PHONE_NUMBER_ID) {
-        method = 'failed';
-        errDetail = 'no_phone_for_media';
-      } else {
+    // WhatsApp: ManyChat para texto + image + file. Audio/video bloqueados temporalmente
+    // (ManyChat WA media blocks no soportan URL dinamica + Cloud API granular_scopes vacio).
+    if (waMedia && (waMedia.type === 'audio' || waMedia.type === 'video')) {
+      method = 'failed';
+      errDetail = 'audio_video_temporarily_disabled';
+      // Marcamos como outside_window para que el frontend muestre algo razonable
+      outsideWindow = false;
+    } else {
+      const mcMedia = waMedia ? { url: waMedia.url, type: waMedia.type, caption: waMedia.caption } : undefined;
+      if (contact.channel_id) {
+        const r = await sendManyChatWA(contact.channel_id, content, mcMedia);
+        if (r.ok) { method = 'manychat'; ok = true; }
+        else {
+          errDetail = `mc: ${r.error}`;
+          if (phone && WA_PHONE_NUMBER_ID) {
+            const r2 = await sendWhatsApp(phone, content, waMedia);
+            if (r2.ok) { method = 'whatsapp_cloud'; ok = true; }
+            else {
+              outsideWindow = r.outsideWindow ?? false;
+              errDetail += ` | wa: ${r2.error}`;
+            }
+          } else {
+            outsideWindow = r.outsideWindow ?? false;
+          }
+        }
+      } else if (phone && WA_PHONE_NUMBER_ID) {
         const r = await sendWhatsApp(phone, content, waMedia);
         if (r.ok) { method = 'whatsapp_cloud'; ok = true; }
-        else { errDetail = r.error ?? ''; outsideWindow = r.outsideWindow ?? false; }
+        else { outsideWindow = r.outsideWindow ?? false; errDetail = r.error ?? ''; }
       }
-    } else if (contact.channel_id) {
-      const r = await sendManyChatWA(contact.channel_id, content);
-      if (r.ok) { method = 'manychat'; ok = true; }
-      else {
-        errDetail = `mc: ${r.error}`;
-        // Fallback Cloud API
-        if (phone && WA_PHONE_NUMBER_ID) {
-          const r2 = await sendWhatsApp(phone, content);
-          if (r2.ok) { method = 'whatsapp_cloud'; ok = true; }
-          else {
-            outsideWindow = r.outsideWindow ?? false;
-            errDetail += ` | wa: ${r2.error}`;
-          }
-        } else {
-          outsideWindow = r.outsideWindow ?? false;
-        }
-      }
-    } else if (phone && WA_PHONE_NUMBER_ID) {
-      const r = await sendWhatsApp(phone, content);
-      if (r.ok) { method = 'whatsapp_cloud'; ok = true; }
-      else { outsideWindow = r.outsideWindow ?? false; errDetail = r.error ?? ''; }
     }
 
   // ── Instagram ───────────────────────────────────────────────────────────────

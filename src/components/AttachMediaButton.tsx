@@ -61,6 +61,11 @@ export default function AttachMediaButton({ contactId, agentId, channel, onSent,
       alert(`Archivo muy grande (${(file.size / 1024 / 1024).toFixed(1)} MB). Máximo 50 MB.`);
       return;
     }
+    // Bloqueo temporal: video y audio no se pueden enviar al WhatsApp del cliente todavía.
+    if (file.type.startsWith('video/') || file.type.startsWith('audio/')) {
+      alert(`El envío de ${file.type.startsWith('video/') ? 'videos' : 'audios'} desde el CRM está temporalmente deshabilitado.\n\nMandalo desde WhatsApp Web del número de Turdo (+54 9 223 525-2984) en otra pestaña. La respuesta del cliente sí va a llegar al CRM.`);
+      return;
+    }
     setShowMenu(false);
     let processed = file;
     if (file.type.startsWith('image/')) {
