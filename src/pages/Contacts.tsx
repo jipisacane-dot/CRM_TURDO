@@ -1,12 +1,12 @@
-import { useState, useRef, useMemo } from 'react';
+import { useState, useRef, useMemo, useEffect } from 'react';
 import { useApp } from '../contexts/AppContext';
 import { useNavigate } from 'react-router-dom';
-import { AGENTS } from '../data/mock';
 import { ChannelIcon } from '../components/ui/ChannelIcon';
 import { formatDistanceToNow } from 'date-fns';
 import { es } from 'date-fns/locale';
 import type { Lead } from '../types';
 import { supabase } from '../services/supabase';
+import { pipelineStagesApi, type PipelineStage } from '../services/pipeline';
 import CreateContactModal from '../components/CreateContactModal';
 
 const statusColors: Record<string, string> = {
@@ -44,7 +44,7 @@ function ContactAvatar({ lead }: { lead: Lead }) {
 }
 
 export default function Contacts() {
-  const { leads, refreshLeads, loading, currentUser, bulkAssign } = useApp();
+  const { leads, refreshLeads, loading, currentUser, bulkAssign, bulkUpdateStage, dbAgents } = useApp();
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -58,8 +58,15 @@ export default function Contacts() {
   // Bulk selection state
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkAgent, setBulkAgent] = useState<string>('');
+  const [bulkStage, setBulkStage] = useState<string>('');
   const [bulkBusy, setBulkBusy] = useState(false);
   const [bulkResult, setBulkResult] = useState<{ count: number; agentName: string } | null>(null);
+
+  // Pipeline stages (cargadas una vez)
+  const [pipelineStages, setPipelineStages] = useState<PipelineStage[]>([]);
+  useEffect(() => {
+    pipelineStagesApi.list().then(setPipelineStages).catch(e => console.error('[contacts] stages load err:', e));
+  }, []);
 
   const isAdmin = currentUser.role === 'admin';
   // Vendedores filtran por currentUser.dbId (UUID real), NO por currentUser.id (mock string)
@@ -117,10 +124,10 @@ export default function Contacts() {
   // Counts for unassigned filter button
   const unassignedCount = useMemo(() => scope.filter(l => !l.assignedTo).length, [scope]);
 
-  // Available agents for bulk-assign (mock for now; AGENTS source matches the rest of the app)
+  // Agentes reales desde DB con UUIDs válidos (no del mock).
   const assignableAgents = useMemo(
-    () => AGENTS.filter(a => a.role === 'agent'),
-    []
+    () => dbAgents.filter(a => a.role === 'agent'),
+    [dbAgents]
   );
 
   const handleBulkAssign = async () => {
@@ -128,9 +135,7 @@ export default function Contacts() {
     setBulkBusy(true);
     setBulkResult(null);
     try {
-      // Translate agent mock id to db id: AGENTS use string ids that match agents.id (UUID) for admin.
-      // For agents in mock, the id IS the db uuid (per AppContext.assignLead pattern).
-      const agentRow = AGENTS.find(a => a.id === bulkAgent);
+      const agentRow = dbAgents.find(a => a.id === bulkAgent);
       const { updated, error } = await bulkAssign(Array.from(selectedIds), bulkAgent);
       if (error) {
         setBulkResult({ count: 0, agentName: `Error: ${error}` });
@@ -142,6 +147,56 @@ export default function Contacts() {
     } finally {
       setBulkBusy(false);
     }
+  };
+
+  const handleBulkUpdateStage = async () => {
+    if (!bulkStage || selectedIds.size === 0) return;
+    setBulkBusy(true);
+    setBulkResult(null);
+    try {
+      const stageRow = pipelineStages.find(s => s.key === bulkStage);
+      const { updated, error } = await bulkUpdateStage(Array.from(selectedIds), bulkStage);
+      if (error) {
+        setBulkResult({ count: 0, agentName: `Error: ${error}` });
+      } else {
+        setBulkResult({ count: updated, agentName: `etapa "${stageRow?.name ?? bulkStage}"` });
+        clearSelection();
+        setBulkStage('');
+      }
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
+  const handleBulkExportCSV = () => {
+    if (selectedIds.size === 0) return;
+    const rows = filtered.filter(l => selectedIds.has(l.id));
+    const escape = (v: string | undefined | null) => {
+      const s = (v ?? '').toString();
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const stageNameByKey = new Map(pipelineStages.map(s => [s.key, s.name]));
+    const agentNameById = new Map(dbAgents.map(a => [a.id, a.name]));
+    const header = ['N°', 'Nombre', 'Email', 'Teléfono', 'Estado', 'Canal', 'Etapa', 'Asignado a', 'Última actividad'];
+    const lines = rows.map((l, i) => [
+      String(i + 1),
+      escape(l.name),
+      escape(l.email),
+      escape(l.phone),
+      escape(l.phone ? 'Con teléfono' : 'Sin teléfono'),
+      escape(l.channel),
+      escape(stageNameByKey.get(l.current_stage_key ?? 'nuevo') ?? l.current_stage_key ?? ''),
+      escape(l.assignedTo ? (agentNameById.get(l.assignedTo) ?? l.assignedTo) : ''),
+      escape(l.lastActivity),
+    ].join(','));
+    const csv = '﻿' + [header.join(','), ...lines].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `contactos_${new Date().toISOString().slice(0,10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -296,6 +351,7 @@ export default function Contacts() {
             <span>seleccionado{selectedIds.size === 1 ? '' : 's'}</span>
           </div>
           <div className="h-4 w-px bg-border" />
+          {/* Bulk assign */}
           <select
             value={bulkAgent}
             onChange={e => setBulkAgent(e.target.value)}
@@ -312,12 +368,42 @@ export default function Contacts() {
             disabled={!bulkAgent || bulkBusy}
             className="px-4 py-2 bg-crimson hover:bg-crimson-light disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-semibold rounded-lg transition-all"
           >
-            {bulkBusy ? 'Asignando...' : `Asignar ${selectedIds.size}`}
+            {bulkBusy ? '...' : `Asignar`}
+          </button>
+          <div className="h-4 w-px bg-border" />
+          {/* Bulk update stage */}
+          <select
+            value={bulkStage}
+            onChange={e => setBulkStage(e.target.value)}
+            disabled={bulkBusy || pipelineStages.length === 0}
+            className="bg-bg-card border border-border rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-crimson"
+          >
+            <option value="">Mover a etapa...</option>
+            {pipelineStages.map(s => (
+              <option key={s.key} value={s.key}>{s.name}</option>
+            ))}
+          </select>
+          <button
+            onClick={handleBulkUpdateStage}
+            disabled={!bulkStage || bulkBusy}
+            className="px-4 py-2 bg-crimson hover:bg-crimson-light disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-semibold rounded-lg transition-all"
+          >
+            {bulkBusy ? '...' : `Mover`}
+          </button>
+          <div className="h-4 w-px bg-border" />
+          {/* Export CSV */}
+          <button
+            onClick={handleBulkExportCSV}
+            disabled={bulkBusy}
+            className="px-4 py-2 bg-bg-card hover:bg-bg-hover border border-border text-white text-sm font-semibold rounded-lg transition-all"
+            title="Exportar selección a CSV"
+          >
+            📥 Exportar CSV
           </button>
           <button
             onClick={clearSelection}
             disabled={bulkBusy}
-            className="px-3 py-2 text-sm text-muted hover:text-white transition-all"
+            className="ml-auto px-3 py-2 text-sm text-muted hover:text-white transition-all"
           >
             Cancelar
           </button>
@@ -361,7 +447,7 @@ export default function Contacts() {
                 <tr><td colSpan={isAdmin ? 9 : 8} className="text-center py-12 text-muted text-sm">No se encontraron contactos</td></tr>
               )}
               {filtered.map(lead => {
-                const agent = lead.assignedTo ? AGENTS.find(a => a.id === lead.assignedTo) : null;
+                const agent = lead.assignedTo ? dbAgents.find(a => a.id === lead.assignedTo) : null;
                 const isSelected = selectedIds.has(lead.id);
                 return (
                   <tr

@@ -82,6 +82,7 @@ interface AppContextType {
   loadLeadMessages: (leadId: string) => Promise<void>;
   assignLead: (leadId: string, agentId: string) => Promise<void>;
   bulkAssign: (leadIds: string[], agentId: string) => Promise<{ updated: number; error?: string }>;
+  bulkUpdateStage: (leadIds: string[], stageKey: string) => Promise<{ updated: number; error?: string }>;
   updateLeadStatus: (leadId: string, status: Lead['status']) => Promise<void>;
   sendMessage: (leadId: string, content: string) => Promise<SendResult>;
   unreadCount: number;
@@ -433,6 +434,32 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     return { updated: totalUpdated };
   };
 
+  const bulkUpdateStage = async (leadIds: string[], stageKey: string): Promise<{ updated: number; error?: string }> => {
+    if (leadIds.length === 0) return { updated: 0 };
+
+    const CHUNK = 500;
+    let totalUpdated = 0;
+    for (let i = 0; i < leadIds.length; i += CHUNK) {
+      const chunk = leadIds.slice(i, i + CHUNK);
+      const { error, count } = await supabase
+        .from('contacts')
+        .update({ current_stage_key: stageKey }, { count: 'exact' })
+        .in('id', chunk);
+      if (error) {
+        console.error('[bulkUpdateStage] error:', error);
+        return { updated: totalUpdated, error: error.message };
+      }
+      totalUpdated += count ?? chunk.length;
+    }
+
+    // Update local state — el trigger DB se encarga de stage_changed_at
+    setLeads(prev => prev.map(l =>
+      leadIds.includes(l.id) ? { ...l, current_stage_key: stageKey, stage_changed_at: new Date().toISOString() } : l
+    ));
+
+    return { updated: totalUpdated };
+  };
+
   const updateLeadStatus = async (leadId: string, status: Lead['status']) => {
     await db.contacts.update(leadId, { status });
     setLeads(prev => prev.map(l => l.id === leadId ? { ...l, status } : l));
@@ -539,7 +566,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   );
 
   const value = useMemo<AppContextType>(() => ({
-    currentUser, dbAgents, leads, loading, refreshLeads, loadLeadMessages, assignLead, bulkAssign, updateLeadStatus,
+    currentUser, dbAgents, leads, loading, refreshLeads, loadLeadMessages, assignLead, bulkAssign, bulkUpdateStage, updateLeadStatus,
     sendMessage, unreadCount, dueReminders, createReminder, completeReminder, refreshReminders,
   }), [currentUser, dbAgents, leads, loading, refreshLeads, loadLeadMessages, unreadCount, dueReminders, refreshReminders]);
 
