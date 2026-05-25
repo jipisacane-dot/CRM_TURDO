@@ -1,7 +1,6 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { InboxItem } from '../components/InboxItem';
 import { useApp } from '../contexts/AppContext';
-import { AGENTS } from '../data/mock';
 import { ChannelIcon, channelLabel } from '../components/ui/ChannelIcon';
 import { StatusBadge } from '../components/ui/StatusBadge';
 import { Avatar } from '../components/ui/Avatar';
@@ -42,7 +41,7 @@ function LeadAvatar({ lead, size = 'md' }: { lead: Lead; size?: 'sm' | 'md' }) {
 const ALL_CHANNELS: (Channel | 'all')[] = ['all', 'whatsapp', 'instagram', 'facebook', 'email', 'web', 'zonaprop', 'argenprop'];
 
 export default function Inbox() {
-  const { leads, assignLead, sendMessage, loading, dueReminders, completeReminder, currentUser, refreshLeads, loadLeadMessages } = useApp();
+  const { leads, assignLead, sendMessage, loading, dueReminders, completeReminder, currentUser, dbAgents, refreshLeads, loadLeadMessages } = useApp();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [channelFilter, setChannelFilter] = useState<Channel | 'all'>('all');
   const [qualityFilter, setQualityFilter] = useState<'all' | 'hot' | 'warm' | 'cold' | 'unrated'>('all');
@@ -130,6 +129,12 @@ export default function Inbox() {
   const handleSelectLead = useCallback((id: string) => setSelectedId(id), []);
   const unreadInLead = useCallback((lead: typeof leads[number]) =>
     lead.messages.filter(m => !m.read && m.direction === 'in').length, []);
+  // Mapa agentId → name para resolución rápida (estable salvo que cambien dbAgents)
+  const agentNameById = useMemo(() => {
+    const m = new Map<string, string>();
+    dbAgents.forEach(a => m.set(a.id, a.name));
+    return m;
+  }, [dbAgents]);
 
   const selected = selectedId ? (leads.find(l => l.id === selectedId) ?? null) : null;
 
@@ -147,18 +152,21 @@ export default function Inbox() {
     setSending(false);
     if (!result.ok) {
       if (result.auth_error) {
-        setSendError('⚠ Token de Meta vencido — el admin debe renovar el token de la app en developers.facebook.com (afecta WhatsApp, Instagram y Facebook por igual).');
-      } else if (result.permission_error) {
-        setSendError('⚠ La app de Meta no tiene los permisos necesarios. Avisale al admin para revisar permisos en developers.facebook.com.');
-      } else if (result.outside_window) {
-        setSendError('Pasaron más de 24hs desde el último mensaje del contacto. WhatsApp e Instagram solo permiten responder dentro de ese período. Pedile al contacto que te escriba primero.');
+        setSendError('⚠ Token de Meta vencido. Avisale al admin para renovar el token.');
+      } else if (result.permission_error || result.outside_window) {
+        // Tanto code 200 de Meta como "outside window" de ManyChat representan el
+        // mismo problema estructural: no podemos enviar a este contacto desde el
+        // CRM hasta que ManyChat registre una "interacción" real (click en botón
+        // o quick reply de un flujo). Por ahora, solo se puede responder desde
+        // la app de WhatsApp Business directamente.
+        setSendError('No se puede responder a este contacto desde el CRM. Respondele desde WhatsApp Business directamente (Estamos trabajando en arreglar esto).');
       } else {
         setSendError('No se pudo enviar el mensaje. Revisá que el contacto esté activo en el canal.');
       }
     }
   };
 
-  const assignedAgent = selected?.assignedTo ? AGENTS.find(a => a.id === selected.assignedTo) : null;
+  const assignedAgent = selected?.assignedTo ? dbAgents.find(a => a.id === selected.assignedTo) : null;
 
   return (
     <div
@@ -234,6 +242,7 @@ export default function Inbox() {
               lead={lead}
               isSelected={selectedId === lead.id}
               unread={unreadInLead(lead)}
+              agentName={lead.assignedTo ? agentNameById.get(lead.assignedTo) : undefined}
               onSelect={handleSelectLead}
             />
           ))}
@@ -336,16 +345,20 @@ export default function Inbox() {
 
           {/* Messages */}
           <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-3">
-            {selected.messages.map(msg => (
+            {selected.messages.map(msg => {
+              const failed = msg.direction === 'out' && msg.delivery_status === 'failed';
+              return (
               <div key={msg.id} className={`flex ${msg.direction === 'out' ? 'justify-end' : 'justify-start'}`}>
                 <div className={`max-w-[75%] rounded-2xl px-4 py-2.5 text-sm ${
                   msg.direction === 'out'
-                    ? 'bg-crimson text-white rounded-br-md'
+                    ? failed
+                      ? 'bg-red-900/40 border border-red-500/60 text-white rounded-br-md'
+                      : 'bg-crimson text-white rounded-br-md'
                     : 'bg-bg-card border border-border text-gray-200 rounded-bl-md'
                 }`}>
                   {msg.direction === 'out' && msg.agentId && (
                     <div className="text-[10px] text-crimson-50/70 mb-1">
-                      {AGENTS.find(a => a.id === msg.agentId)?.name.split(' ')[0]} ·
+                      {dbAgents.find(a => a.id === msg.agentId)?.name.split(' ')[0]} ·
                     </div>
                   )}
                   {msg.media_type && msg.media_url ? (
@@ -353,17 +366,35 @@ export default function Inbox() {
                   ) : (
                     <p className="leading-relaxed whitespace-pre-wrap">{msg.content}</p>
                   )}
-                  <div className={`text-[10px] mt-1 ${msg.direction === 'out' ? 'text-white/50' : 'text-muted'}`}>
-                    {format(new Date(msg.timestamp), 'HH:mm')}
+                  <div className={`text-[10px] mt-1 flex items-center gap-1.5 ${msg.direction === 'out' ? (failed ? 'text-red-200' : 'text-white/50') : 'text-muted'}`}>
+                    <span>{format(new Date(msg.timestamp), 'HH:mm')}</span>
+                    {failed && (
+                      <span title={msg.delivery_error ?? 'No se pudo entregar'} className="font-medium">
+                        · ⚠ No entregado
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>
-            ))}
+              );
+            })}
             <div ref={messagesEndRef} />
           </div>
 
           {/* Reply input */}
           <div className="border-t border-border p-4 bg-bg-card flex-shrink-0">
+            {/* Banner cuando el contacto IG no está linkeado a ManyChat — el envío
+                desde el CRM va a fallar porque (1) la app no tiene capability
+                instagram_manage_messages aprobada y (2) ManyChat no conoce a este
+                subscriber. Vendedor tiene que responder desde IG nativo. */}
+            {selected.channel === 'instagram' && !selected.manychatSubscriberId && (
+              <div className="mb-3 px-3 py-2 bg-amber-50 border border-amber-300 rounded-lg text-xs text-amber-800 flex items-start gap-2">
+                <span className="flex-shrink-0 mt-0.5">📱</span>
+                <span>
+                  <strong>Respondé desde Instagram nativo.</strong> Este contacto no se puede contactar desde el CRM porque no pasó por un flujo de ManyChat. Una vez que vuelva a escribir, se va a habilitar automáticamente.
+                </span>
+              </div>
+            )}
             {sendError && (
               <div className="mb-3 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-600 flex items-start gap-2">
                 <span className="flex-shrink-0 mt-0.5">⚠</span>
@@ -390,14 +421,14 @@ export default function Inbox() {
                 />
                 <AttachMediaButton
                   contactId={selected.id}
-                  agentId={currentUser.id}
+                  agentId={currentUser.dbId ?? ''}
                   channel={channelLabel(selected.channel)}
                   disabled={sending}
                   onSent={() => { void refreshLeads(); }}
                 />
                 <RecordVoiceButton
                   contactId={selected.id}
-                  agentId={currentUser.id}
+                  agentId={currentUser.dbId ?? ''}
                   channel={channelLabel(selected.channel)}
                   disabled={sending}
                   onSent={() => { void refreshLeads(); }}
@@ -454,24 +485,26 @@ export default function Inbox() {
       {/* Assign modal */}
       <Modal open={showAssign} onClose={() => setShowAssign(false)} title="Asignar vendedor">
         <div className="space-y-2">
-          {AGENTS.filter(a => a.role === 'agent').map(agent => (
-            <button
-              key={agent.id}
-              onClick={() => { if (selected) assignLead(selected.id, agent.id); setShowAssign(false); }}
-              className={`w-full flex items-center gap-3 p-3 rounded-xl border transition-all ${
-                selected?.assignedTo === agent.id
-                  ? 'border-crimson bg-crimson/10'
-                  : 'border-border hover:bg-bg-hover'
-              }`}
-            >
-              <Avatar initials={agent.avatar} size="sm" />
-              <div className="text-left flex-1">
-                <div className="text-white text-sm font-medium">{agent.name}</div>
-                <div className="text-muted text-xs">{agent.branch} · {agent.stats.active} activos</div>
-              </div>
-              {selected?.assignedTo === agent.id && <span className="text-crimson-bright text-sm">✓</span>}
-            </button>
-          ))}
+          {dbAgents.map(agent => {
+            const initials = agent.name.split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase();
+            const isSelected = selected?.assignedTo === agent.id;
+            return (
+              <button
+                key={agent.id}
+                onClick={() => { if (selected) assignLead(selected.id, agent.id); setShowAssign(false); }}
+                className={`w-full flex items-center gap-3 p-3 rounded-xl border transition-all ${
+                  isSelected ? 'border-crimson bg-crimson/10' : 'border-border hover:bg-bg-hover'
+                }`}
+              >
+                <Avatar initials={initials} imageUrl={agent.avatar_url ?? undefined} size="sm" />
+                <div className="text-left flex-1">
+                  <div className="text-white text-sm font-medium">{agent.name}</div>
+                  <div className="text-muted text-xs">{agent.branch ?? '—'}</div>
+                </div>
+                {isSelected && <span className="text-crimson-bright text-sm">✓</span>}
+              </button>
+            );
+          })}
         </div>
       </Modal>
 

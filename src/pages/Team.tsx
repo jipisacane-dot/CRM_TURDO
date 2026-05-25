@@ -1,13 +1,37 @@
 import { useState, useMemo } from 'react';
 import { useApp } from '../contexts/AppContext';
-import { AGENTS } from '../data/mock';
 import { Avatar } from '../components/ui/Avatar';
 import { StatusBadge } from '../components/ui/StatusBadge';
 import { Modal } from '../components/ui/Modal';
-import type { Branch } from '../types';
+import type { Branch, Lead } from '../types';
 import { RadarChart, Radar, PolarGrid, PolarAngleAxis, ResponsiveContainer } from 'recharts';
 
-type Agent = typeof AGENTS[number];
+interface AgentWithStats {
+  id: string;
+  name: string;
+  email: string;
+  branch: string | null;
+  avatar: string;
+  avatar_url: string | null;
+  stats: {
+    total: number;
+    active: number;
+    won: number;
+    lost: number;
+    conversionRate: number;
+  };
+}
+
+const initials = (name: string) => name.split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase();
+
+function computeStats(allLeads: Lead[]): { total: number; active: number; won: number; lost: number; conversionRate: number } {
+  const total = allLeads.length;
+  const won = allLeads.filter(l => l.status === 'won').length;
+  const lost = allLeads.filter(l => l.status === 'lost').length;
+  const active = total - won - lost;
+  const conversionRate = total > 0 ? Math.round((won / total) * 100) : 0;
+  return { total, active, won, lost, conversionRate };
+}
 
 const MetricBar = ({ label, value, max, color = '#8B1F1F' }: { label: string; value: number; max: number; color?: string }) => (
   <div>
@@ -21,16 +45,16 @@ const MetricBar = ({ label, value, max, color = '#8B1F1F' }: { label: string; va
   </div>
 );
 
-const AgentCard = ({ agent, leads, onClick }: { agent: Agent; leads: number; onClick: () => void }) => {
-  const wonRate = agent.stats.total > 0 ? Math.round((agent.stats.won / agent.stats.total) * 100) : 0;
+const AgentCard = ({ agent, onClick }: { agent: AgentWithStats; onClick: () => void }) => {
+  const wonRate = agent.stats.conversionRate;
   return (
     <div onClick={onClick} className="bg-bg-card border border-border rounded-2xl p-5 cursor-pointer hover:border-crimson/50 transition-all group">
       <div className="flex items-start justify-between mb-4">
         <div className="flex items-center gap-3">
-          <Avatar initials={agent.avatar} imageUrl={agent.imageUrl} size="lg" online={Math.random() > 0.4} />
+          <Avatar initials={agent.avatar} imageUrl={agent.avatar_url ?? undefined} size="lg" />
           <div>
             <div className="text-white font-semibold group-hover:text-crimson-bright transition-colors">{agent.name}</div>
-            <div className="text-muted text-xs mt-0.5">{agent.branch}</div>
+            <div className="text-muted text-xs mt-0.5">{agent.branch ?? '—'}</div>
           </div>
         </div>
         <div className="text-right">
@@ -58,25 +82,32 @@ const AgentCard = ({ agent, leads, onClick }: { agent: Agent; leads: number; onC
       </div>
 
       <div className="flex items-center justify-between mt-4 pt-3 border-t border-border text-xs text-muted">
-        <span>⏱ {agent.stats.responseTime} resp. prom.</span>
-        <span>{leads} consultas asignadas</span>
+        <span>{agent.stats.total} consultas asignadas</span>
       </div>
     </div>
   );
 };
 
 export default function Team() {
-  const { leads } = useApp();
+  const { leads, dbAgents } = useApp();
   const [branchFilter, setBranchFilter] = useState<Branch | 'all'>('all');
-  const [detailAgent, setDetailAgent] = useState<Agent | null>(null);
+  const [detailAgent, setDetailAgent] = useState<AgentWithStats | null>(null);
 
-  const agents = AGENTS.filter(a => a.role === 'agent');
-
-  const agentLeads = useMemo(() => {
-    const map: Record<string, number> = {};
-    leads.forEach(l => { if (l.assignedTo) map[l.assignedTo] = (map[l.assignedTo] || 0) + 1; });
-    return map;
-  }, [leads]);
+  // Combinar dbAgents con stats computadas en tiempo real desde los leads asignados
+  const agents = useMemo<AgentWithStats[]>(() => {
+    return dbAgents.map(a => {
+      const myLeads = leads.filter(l => l.assignedTo === a.id);
+      return {
+        id: a.id,
+        name: a.name,
+        email: a.email,
+        branch: a.branch,
+        avatar: initials(a.name),
+        avatar_url: a.avatar_url,
+        stats: computeStats(myLeads),
+      };
+    });
+  }, [dbAgents, leads]);
 
   const filtered = agents.filter(a => branchFilter === 'all' || a.branch === branchFilter);
 
@@ -96,7 +127,6 @@ export default function Team() {
   const radarData = detailAgent ? [
     { subject: 'Consultas', value: Math.min(Math.round((detailAgent.stats.total / 150) * 100), 100) },
     { subject: 'Cierre', value: detailAgent.stats.conversionRate },
-    { subject: 'Velocidad', value: Math.max(0, 100 - parseInt(detailAgent.stats.responseTime) * 3) },
     { subject: 'Activos', value: Math.min(Math.round((detailAgent.stats.active / 30) * 100), 100) },
     { subject: 'Ganados', value: Math.min(Math.round((detailAgent.stats.won / 40) * 100), 100) },
   ] : [];
@@ -145,7 +175,7 @@ export default function Team() {
       {/* Agent grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
         {filtered.map(agent => (
-          <AgentCard key={agent.id} agent={agent} leads={agentLeads[agent.id] ?? 0} onClick={() => setDetailAgent(agent)} />
+          <AgentCard key={agent.id} agent={agent} onClick={() => setDetailAgent(agent)} />
         ))}
       </div>
 
@@ -154,11 +184,11 @@ export default function Team() {
         {detailAgent && (
           <div className="space-y-5">
             <div className="flex items-center gap-4">
-              <Avatar initials={detailAgent.avatar} imageUrl={detailAgent.imageUrl} size="lg" />
+              <Avatar initials={detailAgent.avatar} imageUrl={detailAgent.avatar_url ?? undefined} size="lg" />
               <div>
                 <div className="text-white font-bold text-lg">{detailAgent.name}</div>
-                <div className="text-muted text-sm">{detailAgent.branch}</div>
-                <div className="text-muted text-xs mt-0.5">{detailAgent.email} · {detailAgent.phone}</div>
+                <div className="text-muted text-sm">{detailAgent.branch ?? '—'}</div>
+                <div className="text-muted text-xs mt-0.5">{detailAgent.email}</div>
               </div>
             </div>
 
@@ -176,15 +206,9 @@ export default function Team() {
               ))}
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div className="bg-bg-input rounded-xl p-3 text-center">
-                <div className="text-white font-bold text-xl">{detailAgent.stats.conversionRate}%</div>
-                <div className="text-muted text-xs">Tasa de cierre</div>
-              </div>
-              <div className="bg-bg-input rounded-xl p-3 text-center">
-                <div className="text-white font-bold text-xl">{detailAgent.stats.responseTime}</div>
-                <div className="text-muted text-xs">Tiempo de respuesta</div>
-              </div>
+            <div className="bg-bg-input rounded-xl p-3 text-center">
+              <div className="text-white font-bold text-xl">{detailAgent.stats.conversionRate}%</div>
+              <div className="text-muted text-xs">Tasa de cierre</div>
             </div>
 
             <div>

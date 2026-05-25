@@ -74,7 +74,7 @@ export default function Matches() {
         await navigator.clipboard.writeText(buildTemplate(m));
         alert('No tiene WhatsApp registrado. Mensaje copiado al portapapeles para que lo mandes manualmente.');
       }
-      await matchesApi.markNotified(m.id, currentUser.id);
+      await matchesApi.markNotified(m.id, currentUser.dbId ?? '');
       setMatches(prev => prev.filter(x => x.id !== m.id));
       void propLink;
     } finally { setBusy(null); }

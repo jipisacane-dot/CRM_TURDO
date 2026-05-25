@@ -23,6 +23,8 @@ export interface DBContact {
   notes: string | null;
   current_stage_key: string | null;
   stage_changed_at: string | null;
+  manychat_subscriber_id: string | null;
+  ig_psid: string | null;
   created_at: string;
   updated_at: string;
 }

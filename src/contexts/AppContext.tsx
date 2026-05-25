@@ -15,6 +15,8 @@ const toMessages = (rows: DBMessage[], channel: string): Lead['messages'] =>
     channel: channel as Lead['messages'][number]['channel'],
     agentId: m.agent_id ?? undefined,
     read: m.read,
+    delivery_status: (m as DBMessage & { delivery_status?: string }).delivery_status as 'sent' | 'failed' | 'pending' | undefined,
+    delivery_error: (m as DBMessage & { delivery_error?: string | null }).delivery_error ?? null,
     media_type: (m.media_type as Lead['messages'][number]['media_type']) ?? null,
     media_url: m.media_url ?? null,
     media_path: m.media_path ?? null,
@@ -46,6 +48,8 @@ const toLead = (c: DBContact & { current_stage_key?: string | null; stage_change
   quality_label: (c.quality_label as Lead['quality_label']) ?? undefined,
   quality_score: c.quality_score ?? undefined,
   quality_reason: c.quality_reason ?? undefined,
+  manychatSubscriberId: (c as DBContact).manychat_subscriber_id ?? undefined,
+  igPsid: (c as DBContact).ig_psid ?? undefined,
 });
 
 // ── Context ───────────────────────────────────────────────────────────────────
@@ -58,8 +62,20 @@ interface SendResult {
   error?: string;
 }
 
+// Agente real desde la tabla `agents` de Supabase. Los IDs son UUIDs.
+// Usar esto (no AGENTS de mock.ts) en cualquier UI que escriba a contacts.assigned_to.
+export interface DbAgent {
+  id: string;
+  name: string;
+  email: string;
+  branch: string | null;
+  avatar_url: string | null;
+  role: string | null;
+}
+
 interface AppContextType {
   currentUser: Agent & { dbId: string | null };
+  dbAgents: DbAgent[];
   leads: Lead[];
   loading: boolean;
   refreshLeads: () => Promise<void>;
@@ -103,6 +119,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   // dbId = UUID real del agent en Supabase (resuelto via email).
   // Es lo que se usa para filtros que comparan contra contacts.assigned_to (UUID en DB).
   const [agentDbId, setAgentDbId] = useState<string | null>(null);
+  const [dbAgents, setDbAgents] = useState<DbAgent[]>([]);
   const currentUser = { ...baseUser, dbId: agentDbId };
 
   // Leer sesión Supabase Auth al montar y suscribirse a cambios.
@@ -134,6 +151,18 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     });
   }, [baseUser.email]);
 
+  // Cargar lista de agentes reales desde DB (con UUIDs) — para los modales de asignación.
+  // CRÍTICO: los modales DEBEN usar esto, no AGENTS de mock.ts (que tiene IDs slug rotos).
+  useEffect(() => {
+    if (!sessionLoaded) return;
+    supabase
+      .from('agents')
+      .select('id, name, email, branch, avatar_url, role')
+      .eq('role', 'agent')
+      .order('name')
+      .then(({ data }) => { if (data) setDbAgents(data as DbAgent[]); });
+  }, [sessionLoaded]);
+
   const refreshLeads = useCallback(async () => {
     // Esperar a que la sesión Supabase Auth esté cargada — sino la query
     // corre con anon_key y RLS devuelve [] silenciosamente.
@@ -162,6 +191,8 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   // Trae los mensajes completos de un lead específico (1 query targeted).
   // Garantiza que el chat abierto siempre tiene todos los mensajes,
   // sin importar cuánto crezca la tabla messages global.
+  // Side effect: marca todos los inbound como leídos al abrir el chat
+  // (comportamiento estándar tipo WhatsApp/Telegram — apenas entrás, leído).
   const loadLeadMessages = useCallback(async (leadId: string) => {
     if (!sessionLoaded) return;
     try {
@@ -174,6 +205,22 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
           lastActivity: msgs.length > 0 ? msgs[msgs.length - 1].created_at : l.lastActivity,
         };
       }));
+
+      // Mark unread inbounds as read. Update optimista para que el badge
+      // desaparezca instantáneo + escribe a DB en background.
+      const hasUnread = msgs.some(m => m.direction === 'in' && !m.read);
+      if (hasUnread) {
+        setLeads(prev => prev.map(l => {
+          if (l.id !== leadId) return l;
+          return {
+            ...l,
+            messages: l.messages.map(m =>
+              m.direction === 'in' && !m.read ? { ...m, read: true } : m
+            ),
+          };
+        }));
+        db.messages.markRead(leadId).catch(e => console.error('markRead err:', e));
+      }
     } catch (e) {
       console.error('Error cargando mensajes del lead:', leadId, e);
     }
@@ -212,7 +259,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       due_at: dueAt,
       note: note ?? null,
       done: false,
-      agent_id: currentUser.id,
+      agent_id: currentUser.dbId ?? null,
     });
     await refreshReminders();
   };
@@ -395,35 +442,64 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     const lead = leads.find(l => l.id === leadId);
     if (!lead) return { ok: false, error: 'Lead not found' };
 
-    // Optimistic update — show message instantly
+    // Optimistic update — show message instantly + marcar inbound como leídos
+    // (el vendedor respondió, ya no necesitan badge "necesita respuesta")
     const tempId = `temp_${Date.now()}`;
     const now = new Date().toISOString();
+    const hasUnread = lead.messages.some(m => m.direction === 'in' && !m.read);
     setLeads(prev => prev.map(l =>
       l.id === leadId
         ? {
             ...l,
             lastActivity: now,
-            messages: [...l.messages, {
-              id: tempId,
-              direction: 'out' as const,
-              content,
-              timestamp: now,
-              channel: lead.channel,
-              agentId: currentUser.id,
-              read: true,
-            }],
+            messages: [
+              ...l.messages.map(m =>
+                m.direction === 'in' && !m.read ? { ...m, read: true } : m
+              ),
+              {
+                id: tempId,
+                direction: 'out' as const,
+                content,
+                timestamp: now,
+                channel: lead.channel,
+                agentId: currentUser.dbId ?? undefined,
+                read: true,
+              },
+            ],
           }
         : l
     ));
+    if (hasUnread) db.messages.markRead(leadId).catch(e => console.error('markRead err:', e));
 
     const { data, error } = await supabase.functions.invoke('send-message', {
-      body: { contact_id: leadId, content, agent_id: currentUser.id },
+      body: { contact_id: leadId, content, agent_id: currentUser.dbId ?? null },
     });
 
     if (error) {
       console.error('Error sending message:', error);
+      // Marcar el optimistic message como fallido para feedback visual
+      setLeads(prev => prev.map(l =>
+        l.id === leadId
+          ? { ...l, messages: l.messages.map(m => m.id === tempId ? { ...m, delivery_status: 'failed' as const } : m) }
+          : l
+      ));
       return { ok: false, error: error.message };
     }
+
+    // Si llegó el id real de la DB, reemplazar el temp con el real y reflejar delivery_status
+    const realMessageId = data?.message?.id;
+    const deliveryOk = data?.delivery?.ok ?? false;
+    setLeads(prev => prev.map(l =>
+      l.id === leadId
+        ? {
+            ...l,
+            messages: l.messages.map(m => m.id === tempId
+              ? { ...m, id: realMessageId ?? tempId, delivery_status: (deliveryOk ? 'sent' : 'failed') as 'sent' | 'failed' }
+              : m
+            ),
+          }
+        : l
+    ));
 
     const delivery = data?.delivery;
     if (delivery && !delivery.ok) {
@@ -431,11 +507,19 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       let auth_error = false;
       let permission_error = false;
       const errStr = String(delivery.error ?? '');
-      // Match patterns like "code":190 or "code: 190"
+      // Prioridad: si hay code explícito, decide solo por código.
+      // Sino, fallback a regex de heurística (texto del error).
       const codeMatch = errStr.match(/"code"\s*:\s*(\d+)/);
       const code = codeMatch ? parseInt(codeMatch[1], 10) : null;
-      if (code === 190 || /OAuthException|access token/i.test(errStr)) auth_error = true;
-      if (code === 200 || /requires.*permission/i.test(errStr)) permission_error = true;
+      if (code === 190) {
+        auth_error = true;
+      } else if (code === 200) {
+        permission_error = true;
+      } else if (code === null) {
+        // Sin código → heurística por texto
+        if (/access token.*expired|invalid.*token/i.test(errStr)) auth_error = true;
+        else if (/requires.*permission|do not have.*permission/i.test(errStr)) permission_error = true;
+      }
 
       return {
         ok: false,
@@ -455,9 +539,9 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   );
 
   const value = useMemo<AppContextType>(() => ({
-    currentUser, leads, loading, refreshLeads, loadLeadMessages, assignLead, bulkAssign, updateLeadStatus,
+    currentUser, dbAgents, leads, loading, refreshLeads, loadLeadMessages, assignLead, bulkAssign, updateLeadStatus,
     sendMessage, unreadCount, dueReminders, createReminder, completeReminder, refreshReminders,
-  }), [currentUser, leads, loading, refreshLeads, loadLeadMessages, unreadCount, dueReminders, refreshReminders]);
+  }), [currentUser, dbAgents, leads, loading, refreshLeads, loadLeadMessages, unreadCount, dueReminders, refreshReminders]);
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 };

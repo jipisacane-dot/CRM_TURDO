@@ -16,20 +16,20 @@ export default function Templates() {
   const load = async () => {
     setLoading(true);
     try {
-      setTemplates(await templatesApi.listForAgent(currentUser.id));
+      setTemplates(await templatesApi.listForAgent(currentUser.dbId ?? ''));
     } finally {
       setLoading(false);
     }
   };
 
-  useEffect(() => { void load(); }, [currentUser.id]);
+  useEffect(() => { void load(); }, [currentUser.dbId]);
 
   const handleSave = async (draft: MessageTemplate) => {
     if (creating) {
       await templatesApi.create({
         name: draft.name, body: draft.body, category: draft.category,
         shortcut: draft.shortcut, agent_id: draft.agent_id,
-        created_by: currentUser.id,
+        created_by: currentUser.dbId ?? '',
       });
     } else {
       await templatesApi.update(draft.id, {
@@ -55,10 +55,10 @@ export default function Templates() {
       name: '',
       body: '',
       category: 'general',
-      agent_id: currentUser.role === 'admin' ? null : currentUser.id,
+      agent_id: currentUser.role === 'admin' ? null : (currentUser.dbId ?? null),
       shortcut: null,
       use_count: 0,
-      created_by: currentUser.id,
+      created_by: currentUser.dbId ?? null,
       created_at: '',
       updated_at: '',
     });

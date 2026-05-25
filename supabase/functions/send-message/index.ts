@@ -113,6 +113,37 @@ async function sendFacebook(psid: string, text: string, media?: MetaMediaArgs) {
   return { ok: true };
 }
 
+// Reply público debajo del comment. Aprovecha el alcance orgánico del post.
+async function replyToFacebookComment(commentId: string, text: string) {
+  const resp = await fetch(`https://graph.facebook.com/v20.0/${commentId}/comments`, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${FB_TOKEN}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message: text }),
+  });
+  const result = await resp.json();
+  if (!resp.ok) return { ok: false, error: JSON.stringify(result) };
+  return { ok: true, id: result.id as string };
+}
+
+// Private reply: abre/usa la conversación de Messenger con el commentista
+// AUNQUE nunca haya mensajeado a la página antes. Solo se permite UN private
+// reply por cada comment, después la conversación sigue por DM normal.
+// NOTA: el endpoint /private_replies se reemplazó por /me/messages con
+// recipient.comment_id (formato actual de Meta).
+async function privateReplyToComment(commentId: string, text: string) {
+  const resp = await fetch('https://graph.facebook.com/v20.0/me/messages', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${FB_TOKEN}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      recipient: { comment_id: commentId },
+      message: { text },
+    }),
+  });
+  const result = await resp.json();
+  if (!resp.ok) return { ok: false, error: JSON.stringify(result) };
+  return { ok: true };
+}
+
 // Flow namespaces — uno por tipo de contenido. El de texto es el original.
 const MANYCHAT_WA_FLOW_NS       = Deno.env.get('MANYCHAT_WA_FLOW_NS')       ?? ''; // texto solo (existing)
 const MANYCHAT_WA_FLOW_NS_IMAGE = Deno.env.get('MANYCHAT_WA_FLOW_NS_IMAGE') ?? '';
@@ -133,6 +164,54 @@ function flowNsForMedia(type: ManyChatWAMediaArgs['type']): string {
     case 'video':    return MANYCHAT_WA_FLOW_NS_VIDEO;
     case 'document': return MANYCHAT_WA_FLOW_NS_FILE;
   }
+}
+
+// ── ManyChat sendContent — soporta media nativa (image/audio/video/file) ─────
+// Solo funciona si el subscriber existe en ManyChat (inbound vino via ManyChat).
+async function sendManyChatContentWA(
+  subscriberId: string,
+  text: string,
+  media?: ManyChatWAMediaArgs
+): Promise<{ ok: boolean; error?: string; outsideWindow?: boolean }> {
+  const messages: Array<Record<string, unknown>> = [];
+
+  if (media) {
+    // Map CRM media type → ManyChat message type
+    const mcType = media.type === 'document' ? 'file' : media.type; // image|audio|video|file
+    const block: Record<string, unknown> = { type: mcType, url: media.url };
+    if (media.caption && (media.type === 'image' || media.type === 'video')) {
+      block.caption = media.caption;
+    }
+    messages.push(block);
+    // Si hay caption + texto adicional, mandar también como text
+    if (text && text !== media.caption && text !== `[${media.type}]`) {
+      messages.push({ type: 'text', text });
+    }
+  } else {
+    messages.push({ type: 'text', text });
+  }
+
+  const body = {
+    subscriber_id: Number(subscriberId),
+    data: { version: 'v2', content: { messages } },
+  };
+
+  const resp = await fetch('https://api.manychat.com/fb/sending/sendContent', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${MANYCHAT_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const raw = await resp.text();
+  let result: Record<string, unknown>;
+  try { result = JSON.parse(raw); } catch { result = { status: 'error', message: raw.slice(0, 200) }; }
+  console.log(`ManyChat sendContent WA status=${resp.status} type=${media?.type ?? 'text'} body=${JSON.stringify(result).slice(0,200)}`);
+
+  if (resp.ok && result?.status === 'success') return { ok: true };
+
+  // Detectar errores de ventana 24h
+  const fullJson = JSON.stringify(result).toLowerCase();
+  const isWindow = fullJson.includes('24 hour') || fullJson.includes('outside') || fullJson.includes('message tag');
+  return { ok: false, error: `sendContent: ${result?.message ?? JSON.stringify(result)}`, outsideWindow: isWindow };
 }
 
 async function setMCField(subscriberId: number, fieldId: number, value: string): Promise<{ ok: boolean; error?: string }> {
@@ -303,88 +382,202 @@ Deno.serve(async (req) => {
       if (phone) await supabase.from('contacts').update({ phone }).eq('id', contact_id);
     }
 
-    // WhatsApp: ManyChat para texto + image + file. Audio/video bloqueados temporalmente
-    // (ManyChat WA media blocks no soportan URL dinamica + Cloud API granular_scopes vacio).
-    if (waMedia && (waMedia.type === 'audio' || waMedia.type === 'video')) {
+    // WhatsApp routing:
+    // 1) Si hay manychat_subscriber_id → sendContent (soporta media nativa)
+    // 2) Si no hay subscriber pero hay channel_id → sendFlow (texto solo, comportamiento actual)
+    // 3) Fallback → Cloud API (solo funciona si eventualmente se destraba)
+    let mcSubscriberId = (contact.manychat_subscriber_id as string | null) ?? null;
+
+    // Defensa: si no tenemos subscriber_id pero el contacto tiene nombre y phone,
+    // buscar en ManyChat AHORA (puede pasar si el webhook auto-lookup falló por
+    // race con ManyChat al crear el subscriber).
+    if (!mcSubscriberId && contact.name && phone && MANYCHAT_KEY) {
+      const name = contact.name as string;
+      if (name !== 'Sin nombre' && !/^\+?\d+$/.test(name)) {
+        try {
+          const r = await fetch(
+            `https://api.manychat.com/fb/subscriber/findByName?name=${encodeURIComponent(name)}`,
+            { headers: { Authorization: `Bearer ${MANYCHAT_KEY}` } }
+          );
+          if (r.ok) {
+            const j = await r.json();
+            const normPhone = phone.startsWith('+') ? phone : `+${phone.replace(/\D/g, '')}`;
+            const match = (j.data ?? []).find((s: Record<string, unknown>) => s.whatsapp_phone === normPhone);
+            if (match?.id) {
+              mcSubscriberId = String(match.id);
+              await supabase.from('contacts').update({ manychat_subscriber_id: mcSubscriberId }).eq('id', contact_id);
+              console.log(`[send-message] auto-linked contact ${contact_id} → MC ${mcSubscriberId}`);
+            }
+          }
+        } catch (e) {
+          console.warn('[send-message] MC lookup err:', e);
+        }
+      }
+    }
+    const mcMedia = waMedia ? { url: waMedia.url, type: waMedia.type, caption: waMedia.caption } : undefined;
+
+    if (mcSubscriberId) {
+      // Camino nuevo: sendContent (media + texto nativo)
+      const r = await sendManyChatContentWA(mcSubscriberId, content, mcMedia);
+      if (r.ok) { method = 'manychat_content'; ok = true; }
+      else {
+        errDetail = `mc_content: ${r.error}`;
+        outsideWindow = r.outsideWindow ?? false;
+        // Fallback al método viejo de Flow si es texto solo.
+        // CRÍTICO: usar mcSubscriberId (el ID real de Manychat), NO channel_id
+        // (que es el wa_id de WhatsApp y no matchea con Manychat).
+        if (!waMedia) {
+          const r2 = await sendManyChatWA(mcSubscriberId, content, undefined);
+          if (r2.ok) { method = 'manychat_flow'; ok = true; outsideWindow = false; }
+          else { errDetail += ` | mc_flow: ${r2.error}`; }
+        }
+      }
+    } else if (waMedia && (waMedia.type === 'audio' || waMedia.type === 'video')) {
+      // Sin subscriber ManyChat + audio/video → bloqueado (mismo workaround actual)
       method = 'failed';
       errDetail = 'audio_video_temporarily_disabled';
-      // Marcamos como outside_window para que el frontend muestre algo razonable
       outsideWindow = false;
-    } else {
-      const mcMedia = waMedia ? { url: waMedia.url, type: waMedia.type, caption: waMedia.caption } : undefined;
-      if (contact.channel_id) {
-        const r = await sendManyChatWA(contact.channel_id, content, mcMedia);
-        if (r.ok) { method = 'manychat'; ok = true; }
-        else {
-          errDetail = `mc: ${r.error}`;
-          if (phone && WA_PHONE_NUMBER_ID) {
-            const r2 = await sendWhatsApp(phone, content, waMedia);
-            if (r2.ok) { method = 'whatsapp_cloud'; ok = true; }
-            else {
-              outsideWindow = r.outsideWindow ?? false;
-              errDetail += ` | wa: ${r2.error}`;
-            }
-          } else {
+    } else if (contact.channel_id) {
+      // Sin subscriber pero con channel_id (legacy) → sendFlow (texto + image/file via flows)
+      const r = await sendManyChatWA(contact.channel_id, content, mcMedia);
+      if (r.ok) { method = 'manychat'; ok = true; }
+      else {
+        errDetail = `mc: ${r.error}`;
+        if (phone && WA_PHONE_NUMBER_ID) {
+          const r2 = await sendWhatsApp(phone, content, waMedia);
+          if (r2.ok) { method = 'whatsapp_cloud'; ok = true; }
+          else {
             outsideWindow = r.outsideWindow ?? false;
+            errDetail += ` | wa: ${r2.error}`;
           }
+        } else {
+          outsideWindow = r.outsideWindow ?? false;
         }
-      } else if (phone && WA_PHONE_NUMBER_ID) {
-        const r = await sendWhatsApp(phone, content, waMedia);
-        if (r.ok) { method = 'whatsapp_cloud'; ok = true; }
-        else { outsideWindow = r.outsideWindow ?? false; errDetail = r.error ?? ''; }
       }
+    } else if (phone && WA_PHONE_NUMBER_ID) {
+      const r = await sendWhatsApp(phone, content, waMedia);
+      if (r.ok) { method = 'whatsapp_cloud'; ok = true; }
+      else { outsideWindow = r.outsideWindow ?? false; errDetail = r.error ?? ''; }
     }
 
   // ── Instagram ───────────────────────────────────────────────────────────────
   } else if (contact.channel === 'instagram') {
-    // Resolve IGSID: use stored ig_psid, else lookup from ManyChat, else use channel_id if long
-    let igPsid = (contact.ig_psid as string | null) ?? null;
+    // PRIORIDAD: si tenemos manychat_subscriber_id, mandar por ManyChat directo.
+    // La app TurdoManejoDeADS.com NO tiene capability `instagram_manage_messages`
+    // aprobado por Meta, así que sendInstagram directo via Graph API falla con
+    // "(#3) Application does not have the capability". El único path que funciona
+    // hoy es ManyChat (que sí está aprobado por Meta para messaging IG).
+    const mcSubIdIg = (contact.manychat_subscriber_id as string | null) ?? null;
 
-    if (!igPsid && contact.channel_id) {
-      // If channel_id looks like a real PSID (long number), use it directly
-      if (contact.channel_id.length > 12 && /^\d+$/.test(contact.channel_id)) {
-        igPsid = contact.channel_id;
-        await supabase.from('contacts').update({ ig_psid: igPsid }).eq('id', contact_id);
-      } else {
-        // ManyChat subscriber: get ig_id (Instagram PSID)
-        const sub = await getMCSubscriber(contact.channel_id);
-        igPsid = sub?.ig_id ?? null;
-        if (igPsid) await supabase.from('contacts').update({ ig_psid: igPsid }).eq('id', contact_id);
-      }
-    }
-
-    if (igPsid) {
-      const r = await sendInstagram(igPsid, content, metaMedia);
-      if (r.ok) { method = 'meta_instagram'; ok = true; }
+    if (mcSubIdIg && !metaMedia) {
+      // Camino principal: ManyChat sendContent
+      const r = await sendManyChat(mcSubIdIg, content, 'ig');
+      if (r.ok) { method = 'manychat'; ok = true; }
       else {
-        errDetail = r.error ?? '';
-        // Fallback: ManyChat (solo para texto, ManyChat sendContent no soporta attachment.url bien)
-        if (contact.channel_id && !metaMedia) {
-          const r2 = await sendManyChat(contact.channel_id, content, 'ig');
-          if (r2.ok) { method = 'manychat'; ok = true; }
-          else errDetail += ` | mc: ${r2.error}`;
+        errDetail = `mc: ${r.error}`;
+        outsideWindow = r.outsideWindow ?? false;
+      }
+    } else {
+      // Sin subscriber_id: intentar Graph API (probablemente falla) o lookup
+      let igPsid = (contact.ig_psid as string | null) ?? null;
+
+      if (!igPsid && contact.channel_id) {
+        if (contact.channel_id.length > 12 && /^\d+$/.test(contact.channel_id)) {
+          igPsid = contact.channel_id;
+          await supabase.from('contacts').update({ ig_psid: igPsid }).eq('id', contact_id);
+        } else {
+          const sub = await getMCSubscriber(contact.channel_id);
+          igPsid = sub?.ig_id ?? null;
+          if (igPsid) await supabase.from('contacts').update({ ig_psid: igPsid }).eq('id', contact_id);
         }
       }
-    } else if (contact.channel_id && !metaMedia) {
-      // No PSID resolved: try ManyChat directly (solo texto)
-      const r = await sendManyChat(contact.channel_id, content, 'ig');
-      if (r.ok) { method = 'manychat'; ok = true; }
-      else { errDetail = `no_psid | mc: ${r.error}`; method = 'failed'; }
-    } else if (metaMedia) {
-      errDetail = 'no_psid_for_media';
-      method = 'failed';
+
+      if (igPsid) {
+        const r = await sendInstagram(igPsid, content, metaMedia);
+        if (r.ok) { method = 'meta_instagram'; ok = true; }
+        else {
+          errDetail = r.error ?? '';
+          if (contact.channel_id && !metaMedia) {
+            const r2 = await sendManyChat(contact.channel_id, content, 'ig');
+            if (r2.ok) { method = 'manychat'; ok = true; }
+            else errDetail += ` | mc: ${r2.error}`;
+          }
+        }
+      } else if (contact.channel_id && !metaMedia) {
+        const r = await sendManyChat(contact.channel_id, content, 'ig');
+        if (r.ok) { method = 'manychat'; ok = true; }
+        else { errDetail = `no_psid | mc: ${r.error}`; method = 'failed'; }
+      } else if (metaMedia) {
+        errDetail = 'no_psid_for_media';
+        method = 'failed';
+      }
     }
 
   // ── Facebook ────────────────────────────────────────────────────────────────
   } else if (contact.channel === 'facebook' && contact.channel_id) {
-    const r = await sendFacebook(contact.channel_id, content, metaMedia);
-    if (r.ok) { method = 'meta_messenger'; ok = true; }
-    else {
-      errDetail = r.error ?? '';
-      if (!metaMedia) {
-        const r2 = await sendManyChat(contact.channel_id, content, 'fb');
-        if (r2.ok) { method = 'manychat'; ok = true; }
-        else errDetail += ` | mc: ${r2.error}`;
+    // Si el ÚLTIMO mensaje del cliente fue un comentario en post, hacemos
+    // doble disparo: reply público debajo del comment + private_reply (que
+    // abre el DM con el commentista, AUNQUE nunca haya mensajeado a la página).
+    // Esto se aplica cada vez que el lead deja un nuevo comment, no solo en
+    // la primera respuesta — porque cada comment es una pieza independiente
+    // de feedback público que requiere su propia respuesta visible.
+    const { data: lastIn } = await supabase
+      .from('messages')
+      .select('media_type, meta_mid')
+      .eq('contact_id', contact_id)
+      .eq('direction', 'in')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    const lastInIsComment = lastIn?.media_type === 'comment' && lastIn?.meta_mid;
+
+    // Si el contacto vino de un Lead Form (channel_id sintético tipo meta_lead_XXX)
+    // y tiene manychat_subscriber_id, ManyChat es el camino real de entrega.
+    // ManyChat ya capturó al lead via el Form integration y lo puede contactar
+    // por WhatsApp directamente. NO intentar Facebook Messenger porque el
+    // synthetic channel_id no es un PSID real y va a fallar.
+    const isMetaLeadSynthetic = String(contact.channel_id).startsWith('meta_lead_');
+    const mcSubIdFb = (contact.manychat_subscriber_id as string | null) ?? null;
+    if (isMetaLeadSynthetic && mcSubIdFb && !metaMedia) {
+      const r = await sendManyChatContentWA(mcSubIdFb, content);
+      if (r.ok) { method = 'manychat_content'; ok = true; }
+      else {
+        errDetail = `mc_content: ${r.error}`;
+        outsideWindow = r.outsideWindow ?? false;
+        // Fallback sendFlow
+        const r2 = await sendManyChatWA(mcSubIdFb, content, undefined);
+        if (r2.ok) { method = 'manychat_flow'; ok = true; outsideWindow = false; }
+        else errDetail += ` | mc_flow: ${r2.error}`;
+      }
+    } else if (lastInIsComment && !metaMedia) {
+      const commentId = lastIn!.meta_mid as string;
+      const firstName = (contact.name?.split(' ')[0] ?? '').trim();
+      // El reply público lleva un teaser corto que dirige a DM (no exponemos
+      // info de venta en el post — si el cliente pregunta precio público,
+      // respondemos lo justo y derivamos al privado).
+      const publicTeaser = firstName
+        ? `¡Hola ${firstName}! Te paso info por privado 📩`
+        : '¡Hola! Te pasamos info por privado 📩';
+
+      const pubR = await replyToFacebookComment(commentId, publicTeaser);
+      // El DM contiene el mensaje real del vendedor.
+      const dmR = await privateReplyToComment(commentId, content);
+
+      if (dmR.ok) { method = 'fb_private_reply'; ok = true; }
+      else errDetail = `private_reply: ${dmR.error}`;
+      if (!pubR.ok) errDetail += ` | public_reply: ${pubR.error}`;
+    } else {
+      // Sin comment pendiente: DM normal vía Messenger
+      const r = await sendFacebook(contact.channel_id, content, metaMedia);
+      if (r.ok) { method = 'meta_messenger'; ok = true; }
+      else {
+        errDetail = r.error ?? '';
+        if (!metaMedia) {
+          const r2 = await sendManyChat(contact.channel_id, content, 'fb');
+          if (r2.ok) { method = 'manychat'; ok = true; }
+          else errDetail += ` | mc: ${r2.error}`;
+        }
       }
     }
   }
@@ -392,11 +585,22 @@ Deno.serve(async (req) => {
   if (!ok) method = 'failed';
   console.log(`send-message channel=${contact.channel} method=${method} ok=${ok} err=${errDetail.slice(0, 200)}`);
 
-  // Auto-clasificación de etapa del pipeline (fire-and-forget) — el mensaje del vendedor
-  // también puede mover etapa: "te recibo el sábado" → visita_programada, etc.
-  supabase.functions.invoke('classify-message-stage', {
-    body: { contact_id, message_id: msg.id },
-  }).catch(console.error);
+  // Persistir delivery_status en el mensaje para que el UI pueda mostrar
+  // claramente "no entregado" en vez de aparentar éxito.
+  if (msg.id) {
+    await supabase.from('messages').update({
+      delivery_status: ok ? 'sent' : 'failed',
+      delivery_error: ok ? null : errDetail.slice(0, 500),
+    }).eq('id', msg.id);
+  }
+
+  // Auto-clasificación de etapa del pipeline (fire-and-forget) — solo si OK,
+  // sino estaríamos clasificando intenciones de mensajes que nunca llegaron.
+  if (ok) {
+    supabase.functions.invoke('classify-message-stage', {
+      body: { contact_id, message_id: msg.id },
+    }).catch(console.error);
+  }
 
   return new Response(JSON.stringify({
     ok: true,

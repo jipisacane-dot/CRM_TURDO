@@ -105,6 +105,23 @@ function safeText(s: string | null | undefined, fallback = '—'): string {
   return s && s.trim() ? s : fallback;
 }
 
+// Sanitiza texto generado por IA u otros sources para que helvetica de jsPDF
+// pueda renderizar sin glyphs raros. Reemplaza emojis y bullets unicode por
+// equivalentes ASCII. NO toca tildes ni ñ (esos sí renderizan bien).
+function sanitizeForPdf(s: string): string {
+  return s
+    .replace(/[•●○◦▪▫■□]/g, '-')
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'")
+    .replace(/→/g, '->')
+    .replace(/←/g, '<-')
+    .replace(/✓|✔/g, '>')
+    .replace(/✗|✘/g, 'x')
+    // Strip emojis (most multi-byte symbol characters)
+    .replace(/[\u{1F300}-\u{1FAFF}\u{1F600}-\u{1F64F}\u{2600}-\u{27BF}\u{1F000}-\u{1F02F}\u{1F100}-\u{1F1FF}]/gu, '')
+    .trim();
+}
+
 export async function generateAppraisalPdf(data: AppraisalData): Promise<jsPDF> {
   const doc = new jsPDF({ unit: 'pt', format: 'a4', compress: true });
   const W = doc.internal.pageSize.getWidth();
@@ -364,7 +381,7 @@ export async function generateAppraisalPdf(data: AppraisalData): Promise<jsPDF> 
   doc.setTextColor(DARK);
   doc.setFontSize(10);
   doc.setFont('helvetica', 'normal');
-  const reasoningLines = doc.splitTextToSize(data.ai_reasoning || 'Sin razonamiento disponible.', W - 80);
+  const reasoningLines = doc.splitTextToSize(sanitizeForPdf(data.ai_reasoning || 'Sin razonamiento disponible.'), W - 80);
   doc.text(reasoningLines, 40, y);
   y += reasoningLines.length * 13 + 15;
 
@@ -378,7 +395,7 @@ export async function generateAppraisalPdf(data: AppraisalData): Promise<jsPDF> 
     doc.setTextColor(DARK);
     doc.setFontSize(10);
     doc.setFont('helvetica', 'normal');
-    const marketLines = doc.splitTextToSize(data.market_summary, W - 80);
+    const marketLines = doc.splitTextToSize(sanitizeForPdf(data.market_summary), W - 80);
     doc.text(marketLines, 40, y);
     y += marketLines.length * 13 + 15;
   }
@@ -399,7 +416,8 @@ export async function generateAppraisalPdf(data: AppraisalData): Promise<jsPDF> 
     doc.setFontSize(10);
     doc.setFont('helvetica', 'normal');
     data.recommendations.forEach((rec) => {
-      const lines = doc.splitTextToSize(`✓  ${rec}`, W - 90);
+      // ASCII friendly: usar > en vez de ✓ (helvetica no renderiza unicode raro)
+      const lines = doc.splitTextToSize(`>  ${sanitizeForPdf(rec)}`, W - 90);
       if (y + lines.length * 13 > H - 70) {
         doc.addPage();
         addPageHeader('Recomendaciones (cont.)');
@@ -421,13 +439,14 @@ export async function generateAppraisalPdf(data: AppraisalData): Promise<jsPDF> 
   doc.text('Lo que hacemos para vender tu propiedad', 40, y);
   y += 28;
 
+  // helvetica de jsPDF NO soporta emojis — usamos numeración con tipografía clara
   const proposals = [
-    { icon: '📸', title: 'Fotografías profesionales', desc: 'Sesión completa con luz natural y producción.' },
-    { icon: '🎬', title: 'Tour en video + reels', desc: 'Material para Instagram, TikTok y portales.' },
-    { icon: '📐', title: 'Plano arquitectónico', desc: 'Plano digital del inmueble para los avisos.' },
-    { icon: '✨', title: 'Amueblado virtual con IA', desc: 'Si está vacío, agregamos muebles con IA para que se vea habitado.' },
-    { icon: '⭐', title: 'Súper destaque Premier en portales', desc: 'Zonaprop, Argenprop y Mercado Libre con prioridad.' },
-    { icon: '📲', title: 'Difusión en redes', desc: 'Instagram, Facebook y campañas en Meta Ads pagadas.' },
+    { num: '01', title: 'Fotografías profesionales', desc: 'Sesión completa con luz natural y producción.' },
+    { num: '02', title: 'Tour en video + reels', desc: 'Material para Instagram, TikTok y portales.' },
+    { num: '03', title: 'Plano arquitectónico', desc: 'Plano digital del inmueble para los avisos.' },
+    { num: '04', title: 'Amueblado virtual con IA', desc: 'Si está vacío, agregamos muebles con IA para que se vea habitado.' },
+    { num: '05', title: 'Súper destaque Premier en portales', desc: 'Zonaprop, Argenprop y Mercado Libre con prioridad.' },
+    { num: '06', title: 'Difusión en redes', desc: 'Instagram, Facebook y campañas en Meta Ads pagadas.' },
   ];
 
   doc.setFont('helvetica', 'normal');
@@ -435,8 +454,9 @@ export async function generateAppraisalPdf(data: AppraisalData): Promise<jsPDF> 
     doc.setFillColor(SOFT_BG);
     doc.roundedRect(40, y, W - 80, 38, 8, 8, 'F');
     doc.setTextColor(CRIMSON);
-    doc.setFontSize(15);
-    doc.text(p.icon, 56, y + 24);
+    doc.setFontSize(14);
+    doc.setFont('helvetica', 'bold');
+    doc.text(p.num, 56, y + 24);
     doc.setTextColor(DARK);
     doc.setFontSize(11);
     doc.setFont('helvetica', 'bold');
@@ -499,8 +519,8 @@ export async function generateAppraisalPdf(data: AppraisalData): Promise<jsPDF> 
   doc.text(data.agent_name, 60, y + 44);
   doc.setFontSize(10);
   doc.setFont('helvetica', 'normal');
-  if (data.agent_phone) doc.text(`📱  ${data.agent_phone}`, 60, y + 64);
-  if (data.agent_email) doc.text(`✉   ${data.agent_email}`, 60, y + 78);
+  if (data.agent_phone) doc.text(`Tel: ${data.agent_phone}`, 60, y + 64);
+  if (data.agent_email) doc.text(`Email: ${data.agent_email}`, 60, y + 78);
 
   // ── Footer en todas las páginas ───────────────────────────────────────────
   const total = (doc as unknown as { internal: { getNumberOfPages: () => number } }).internal.getNumberOfPages();

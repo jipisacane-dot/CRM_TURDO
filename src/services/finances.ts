@@ -134,8 +134,20 @@ export async function createMovement(input: CreateMovementInput): Promise<Financ
     amount_usd = Math.round((input.amount_original / blue.promedio) * 100) / 100;
   }
 
-  const { data: agentData } = await supabase.auth.getUser();
-  const created_by = agentData?.user?.id ?? null;
+  // CRÍTICO: created_by REFERENCES agents(id), NO auth.users(id).
+  // auth.getUser() devuelve el ID de auth.users — necesitamos resolver al
+  // agente correspondiente vía auth_user_id antes de insertar.
+  const { data: authData } = await supabase.auth.getUser();
+  const authUserId = authData?.user?.id;
+  let created_by: string | null = null;
+  if (authUserId) {
+    const { data: agent } = await supabase
+      .from('agents')
+      .select('id')
+      .eq('auth_user_id', authUserId)
+      .maybeSingle();
+    created_by = agent?.id ?? null;
+  }
 
   const { data, error } = await supabase
     .from('finance_movements')

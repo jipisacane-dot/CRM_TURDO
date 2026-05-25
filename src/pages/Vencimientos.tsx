@@ -96,7 +96,7 @@ export default function Vencimientos() {
   };
 
   const handleResolve = async (id: string) => {
-    await expirationsApi.resolve(id, currentUser.id);
+    await expirationsApi.resolve(id, currentUser.dbId ?? '');
     await refresh();
   };
 

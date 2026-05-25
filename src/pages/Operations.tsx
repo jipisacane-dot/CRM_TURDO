@@ -362,7 +362,9 @@ export default function Operations() {
         cancelled_at: null,
         cancelled_reason: null,
         approval_status: isAdmin ? 'approved' : 'pending',
-        approved_by: isAdmin ? (currentUser.id ?? null) : null,
+        // CRÍTICO: usar dbId (UUID real del agent en Supabase), NO currentUser.id
+        // (que es el slug del mock tipo "leticia"). La columna approved_by espera UUID.
+        approved_by: isAdmin ? (currentUser.dbId ?? null) : null,
         approved_at: null,
         rejected_reason: null,
         paid_at: null,

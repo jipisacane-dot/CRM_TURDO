@@ -145,7 +145,7 @@ export default function Finanzas() {
         related_property_id: null,
         receipt_url: null,
         notes: draft.notes || null,
-        created_by: currentUser.id,
+        created_by: currentUser.dbId ?? null,
       });
       setModalOpen(false);
       setDraft({

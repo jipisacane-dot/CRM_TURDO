@@ -39,7 +39,12 @@ Deno.serve(async (req) => {
 
   // ManyChat payload
   const channelRaw = (body.channel as string) ?? 'fb';
-  const channel = channelMap[channelRaw] ?? 'facebook';
+  let channel = channelMap[channelRaw] ?? 'facebook';
+  // Fallback: si vino phone o whatsapp_phone pero el channel no se mapeó como wa,
+  // forzar a whatsapp (resilient ante variabilidad de nombres de campos en flows).
+  if ((body.whatsapp_phone || body.phone) && channel !== 'whatsapp' && channelRaw !== 'fb' && channelRaw !== 'ig') {
+    channel = 'whatsapp';
+  }
   const channelId = String(body.id ?? body.key ?? '');
 
   // Strip unresolved ManyChat template vars like {{first_name}}
@@ -103,26 +108,85 @@ Deno.serve(async (req) => {
   if (postIdOrigen) noteParts.push(`Post: ${postIdOrigen}`);
   const calificationNotes = noteParts.length > 0 ? noteParts.join(' · ') : null;
 
-  // Upsert contacto por channel_id
-  const { data: contact, error: contactError } = await supabase
-    .from('contacts')
-    .upsert(
-      {
-        channel_id: channelId,
-        channel,
-        name,
-        phone: resolvedPhone,
-        email,
-        avatar_url: avatarUrl,
-        ...(igPsid ? { ig_psid: igPsid } : {}),
-        status: 'new',
-        branch: 'Sucursal Centro',
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: 'channel_id,channel', ignoreDuplicates: false }
-    )
-    .select()
-    .single();
+  // Upsert contacto. Para WhatsApp: si el contacto ya existe por phone (del flow
+  // Meta directo previo), actualizar manychat_subscriber_id sin crear duplicado.
+  let contact: Record<string, unknown> | null = null;
+  let contactError: { message: string } | null = null;
+
+  if (channel === 'whatsapp' && resolvedPhone) {
+    // Buscar contacto existente por phone primero
+    const { data: existing } = await supabase
+      .from('contacts')
+      .select('*')
+      .eq('channel', 'whatsapp')
+      .or(`phone.eq.${resolvedPhone},phone.eq.+${resolvedPhone},channel_id.eq.${resolvedPhone}`)
+      .limit(1)
+      .maybeSingle();
+
+    if (existing) {
+      // Update: poblar manychat_subscriber_id y refrescar metadata
+      const { data: updated, error } = await supabase
+        .from('contacts')
+        .update({
+          manychat_subscriber_id: channelId,
+          name: existing.name && existing.name !== 'Sin nombre' ? existing.name : name,
+          avatar_url: existing.avatar_url ?? avatarUrl,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', existing.id)
+        .select()
+        .single();
+      contact = updated;
+      contactError = error;
+    } else {
+      // Crear nuevo. channel_id = phone (compat), manychat_subscriber_id = channelId
+      const { data: created, error } = await supabase
+        .from('contacts')
+        .insert({
+          channel_id: resolvedPhone,
+          channel: 'whatsapp',
+          manychat_subscriber_id: channelId,
+          name,
+          phone: resolvedPhone,
+          email,
+          avatar_url: avatarUrl,
+          status: 'new',
+          branch: 'Sucursal Centro',
+        })
+        .select()
+        .single();
+      contact = created;
+      contactError = error;
+    }
+  } else {
+    // FB / IG / fallback — upsert por channel_id.
+    // CRÍTICO: guardar manychat_subscriber_id = channelId. ManyChat es el único
+    // path de outbound para IG/FB en este setup, y sin este ID send-message
+    // no puede usar sendContent/sendFlow. Sin esto los vendedores no pueden
+    // responderles (bug recurrente que afectó a varios contactos IG/FB).
+    const { data: upserted, error } = await supabase
+      .from('contacts')
+      .upsert(
+        {
+          channel_id: channelId,
+          channel,
+          manychat_subscriber_id: channelId,
+          name,
+          phone: resolvedPhone,
+          email,
+          avatar_url: avatarUrl,
+          ...(igPsid ? { ig_psid: igPsid } : {}),
+          status: 'new',
+          branch: 'Sucursal Centro',
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: 'channel_id,channel', ignoreDuplicates: false }
+      )
+      .select()
+      .single();
+    contact = upserted;
+    contactError = error;
+  }
 
   // Si vinieron datos calificados, mergear con notes existentes (no pisar)
   if (contact && calificationNotes) {
@@ -153,8 +217,100 @@ Deno.serve(async (req) => {
     } catch { /* silently ignore */ }
   }
 
+  // ── Media inbound desde ManyChat ────────────────────────────────────────────
+  // ManyChat no expone last_attachment_url como variable directa en flows. Por eso:
+  // 1) El forwarder solo manda last_input_type (que indica si es text/image/audio/etc)
+  // 2) Si no es text, llamamos a la API de ManyChat con el subscriber_id para fetch
+  //    el último mensaje y obtener la URL del adjunto.
+  const lastInputType = (clean(body.last_input_type) || '').toLowerCase();
+  let attachmentUrl: string | null = clean(body.last_attachment_url) || null;
+  let attachmentType: string | null = clean(body.last_attachment_type) || null;
+
+  // Si vino last_input_type que indica media pero no la URL, consultar API
+  const mediaTypes = ['image', 'audio', 'voice', 'video', 'document', 'file', 'attachment'];
+  if (!attachmentUrl && lastInputType && mediaTypes.includes(lastInputType) && MANYCHAT_KEY) {
+    try {
+      const lastResp = await fetch(
+        `https://api.manychat.com/fb/subscriber/getInfo?subscriber_id=${channelId}`,
+        { headers: { 'Authorization': `Bearer ${MANYCHAT_KEY}` } }
+      );
+      if (lastResp.ok) {
+        const lastJson = await lastResp.json();
+        // ManyChat retorna last_message info en getInfo response
+        const lastMsg = lastJson?.data?.last_input || lastJson?.data?.last_message;
+        if (lastMsg) {
+          attachmentUrl = lastMsg.url ?? lastMsg.attachment_url ?? lastMsg.media_url ?? null;
+          attachmentType = attachmentType ?? lastMsg.type ?? lastInputType;
+          console.log(`[manychat-webhook] fetched attachment from API: type=${attachmentType} url_present=${!!attachmentUrl}`);
+        }
+      }
+    } catch (e) {
+      console.warn('[manychat-webhook] error fetching attachment:', e);
+    }
+  }
+
+  // Mapeo de tipos ManyChat → CRM
+  const MC_MEDIA_MAP: Record<string, string> = {
+    'image': 'image',
+    'audio': 'audio',
+    'voice': 'audio',
+    'video': 'video',
+    'document': 'document',
+    'file': 'document',
+  };
+  const crmMediaType = attachmentType ? MC_MEDIA_MAP[attachmentType.toLowerCase()] ?? null : null;
+
+  if (attachmentUrl && crmMediaType && contact) {
+    try {
+      // Descargar el archivo de ManyChat
+      const dlResp = await fetch(attachmentUrl);
+      if (dlResp.ok) {
+        const buffer = new Uint8Array(await dlResp.arrayBuffer());
+        const contentType = dlResp.headers.get('content-type') ?? 'application/octet-stream';
+        const ext = (contentType.split('/')[1] || 'bin').split(';')[0];
+        const path = `${contact.id}/in_mc_${Date.now()}_${Math.random().toString(36).slice(2,8)}.${ext}`;
+
+        const { error: upErr } = await supabase.storage.from('chat-media').upload(path, buffer, {
+          contentType,
+          upsert: false,
+        });
+
+        if (!upErr) {
+          const { data: signed } = await supabase.storage.from('chat-media').createSignedUrl(path, 365 * 24 * 3600);
+          const bucket = Math.floor(Date.now() / (5 * 60 * 1000));
+          const metaMid = `mc_media_${channel}_${channelId}_${bucket}_${path.slice(-12)}`;
+
+          await supabase.from('messages').upsert(
+            {
+              contact_id: contact.id,
+              direction: 'in',
+              content: lastMessage || `[${crmMediaType}]`,
+              channel,
+              media_type: crmMediaType,
+              media_url: signed?.signedUrl ?? null,
+              media_path: path,
+              media_caption: lastMessage || null,
+              media_mime: contentType,
+              media_size_bytes: buffer.length,
+              meta_mid: metaMid,
+              read: false,
+            },
+            { onConflict: 'meta_mid', ignoreDuplicates: true }
+          );
+          console.log(`[manychat-webhook] media inbound saved: type=${crmMediaType} size=${buffer.length}`);
+        } else {
+          console.error(`[manychat-webhook] storage upload err:`, upErr);
+        }
+      } else {
+        console.warn(`[manychat-webhook] media download failed: status=${dlResp.status} url=${attachmentUrl.slice(0,80)}`);
+      }
+    } catch (e) {
+      console.error('[manychat-webhook] media handling err:', e);
+    }
+  }
+
   // Insertar mensaje si viene texto — deduplicado por hash del contenido + canal + ventana de 5min
-  if (lastMessage && contact) {
+  if (lastMessage && !attachmentUrl && contact) {
     // Minute bucket rounded to 5 so ManyChat retries within a few minutes collide and dedup
     const bucket = Math.floor(Date.now() / (5 * 60 * 1000));
     // djb2 hash of content to keep the mid short and deterministic

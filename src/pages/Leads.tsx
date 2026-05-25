@@ -1,6 +1,5 @@
 import { useState, useMemo } from 'react';
 import { useApp } from '../contexts/AppContext';
-import { AGENTS } from '../data/mock';
 import { ChannelIcon } from '../components/ui/ChannelIcon';
 import { StatusBadge, statusConfig } from '../components/ui/StatusBadge';
 import { Avatar } from '../components/ui/Avatar';
@@ -13,7 +12,7 @@ const STATUSES: (LeadStatus | 'all')[] = ['all', 'new', 'contacted', 'qualified'
 const BRANCHES: (Branch | 'all')[] = ['all', 'Corrientes', 'Alem'];
 
 export default function Leads() {
-  const { leads, assignLead, updateLeadStatus, currentUser } = useApp();
+  const { leads, assignLead, updateLeadStatus, currentUser, dbAgents } = useApp();
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<LeadStatus | 'all'>('all');
   const [branchFilter, setBranchFilter] = useState<Branch | 'all'>('all');
@@ -62,7 +61,7 @@ export default function Leads() {
             className="bg-bg-card border border-border rounded-xl px-3 py-2.5 text-sm text-white outline-none focus:border-crimson cursor-pointer">
             <option value="all">Todos los vendedores</option>
             <option value="">Sin asignar</option>
-            {AGENTS.filter(a => a.role === 'agent').map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+            {dbAgents.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
           </select>
         )}
       </div>
@@ -81,7 +80,7 @@ export default function Leads() {
             </thead>
             <tbody>
               {filtered.map(lead => {
-                const agent = AGENTS.find(a => a.id === lead.assignedTo);
+                const agent = dbAgents.find(a => a.id === lead.assignedTo);
                 const unread = lead.messages.filter(m => !m.read && m.direction === 'in').length;
                 return (
                   <tr key={lead.id} className="border-b border-border/50 hover:bg-bg-hover transition-colors cursor-pointer" onClick={() => setDetailLead(lead)}>
@@ -107,7 +106,11 @@ export default function Leads() {
                     <td className="px-4 py-3">
                       {agent ? (
                         <div className="flex items-center gap-2">
-                          <Avatar initials={agent.avatar} size="xs" />
+                          <Avatar
+                            initials={agent.name.split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase()}
+                            imageUrl={agent.avatar_url ?? undefined}
+                            size="xs"
+                          />
                           <span className="text-sm text-gray-300">{agent.name.split(' ')[0]}</span>
                         </div>
                       ) : (
@@ -146,19 +149,22 @@ export default function Leads() {
       {/* Assign modal */}
       <Modal open={!!assigningLead} onClose={() => setAssigningLead(null)} title={`Asignar · ${assigningLead?.name}`}>
         <div className="space-y-2">
-          {AGENTS.filter(a => a.role === 'agent').map(agent => (
-            <button
-              key={agent.id}
-              onClick={() => { if (assigningLead) assignLead(assigningLead.id, agent.id); setAssigningLead(null); }}
-              className="w-full flex items-center gap-3 p-3 rounded-xl border border-border hover:bg-bg-hover hover:border-crimson transition-all"
-            >
-              <Avatar initials={agent.avatar} size="sm" />
-              <div className="text-left flex-1">
-                <div className="text-white text-sm font-medium">{agent.name}</div>
-                <div className="text-muted text-xs">{agent.branch} · {agent.stats.active} activos · {agent.stats.conversionRate}% cierre</div>
-              </div>
-            </button>
-          ))}
+          {dbAgents.map(agent => {
+            const initials = agent.name.split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase();
+            return (
+              <button
+                key={agent.id}
+                onClick={() => { if (assigningLead) assignLead(assigningLead.id, agent.id); setAssigningLead(null); }}
+                className="w-full flex items-center gap-3 p-3 rounded-xl border border-border hover:bg-bg-hover hover:border-crimson transition-all"
+              >
+                <Avatar initials={initials} imageUrl={agent.avatar_url ?? undefined} size="sm" />
+                <div className="text-left flex-1">
+                  <div className="text-white text-sm font-medium">{agent.name}</div>
+                  <div className="text-muted text-xs">{agent.branch ?? '—'}</div>
+                </div>
+              </button>
+            );
+          })}
         </div>
       </Modal>
 

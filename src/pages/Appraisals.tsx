@@ -89,15 +89,29 @@ export default function Appraisals() {
       const newPhotos: typeof photos = [];
       const failures: string[] = [];
       for (const file of Array.from(files).slice(0, 6 - photos.length)) {
-        if (!file.type.startsWith('image/')) {
-          failures.push(`${file.name}: no es una imagen válida`);
+        // Aceptar por MIME o por extensión: algunos celulares mandan jpg sin
+        // type seteado o como application/octet-stream.
+        const lowerName = file.name.toLowerCase();
+        const isImageByMime = file.type.startsWith('image/');
+        const isImageByExt = /\.(jpg|jpeg|png|webp|gif|heic|heif|bmp)$/i.test(lowerName);
+        if (!isImageByMime && !isImageByExt) {
+          failures.push(`${file.name}: no es una imagen válida (tipo: ${file.type || 'desconocido'})`);
           continue;
         }
-        const compressed = await compressImage(file);
-        const ext = compressed.type.split('/')[1] ?? 'jpg';
+        let compressed: File;
+        try {
+          compressed = await compressImage(file);
+        } catch (e) {
+          // Si la compresión falla (ej. HEIC en browser sin soporte), subir el original
+          console.warn('compressImage failed, uploading original:', e);
+          compressed = file;
+        }
+        // Determinar MIME y extensión seguros para el storage
+        const safeMime = compressed.type && compressed.type.startsWith('image/') ? compressed.type : 'image/jpeg';
+        const ext = safeMime.split('/')[1]?.split('+')[0] ?? 'jpg';
         const path = `appraisals/${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`;
         const { error: upErr } = await supabase.storage.from('chat-media').upload(path, compressed, {
-          contentType: compressed.type,
+          contentType: safeMime,
           upsert: false,
         });
         if (upErr) {
@@ -132,7 +146,7 @@ export default function Appraisals() {
         property,
         client: (client.name || client.phone) ? client : undefined,
         photos,
-        agent_id: currentUser.id,
+        agent_id: currentUser.dbId ?? '',
         agent_email: currentUser.email,
       });
       if (!r || typeof r.suggested_price_low_usd !== 'number') {
@@ -164,7 +178,7 @@ export default function Appraisals() {
         property,
         client: (client.name || client.phone) ? client : undefined,
         photos,
-        agent_id: currentUser.id,
+        agent_id: currentUser.dbId ?? '',
         agent_email: currentUser.email,
         suggested_price_low_usd: editedLow,
         suggested_price_high_usd: editedHigh,

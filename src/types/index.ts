@@ -32,6 +32,8 @@ export interface Message {
   channel: Channel;
   agentId?: string;
   read: boolean;
+  delivery_status?: 'sent' | 'failed' | 'pending';
+  delivery_error?: string | null;
   media_type?: 'image' | 'video' | 'audio' | 'document' | 'sticker' | null;
   media_url?: string | null;
   media_path?: string | null;
@@ -64,6 +66,8 @@ export interface Lead {
   quality_label?: 'hot' | 'warm' | 'cold' | null;
   quality_score?: number | null;
   quality_reason?: string | null;
+  manychatSubscriberId?: string | null;
+  igPsid?: string | null;
 }
 
 export interface PortalStat {

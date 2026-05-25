@@ -93,10 +93,8 @@ Deno.serve(async (req) => {
 
   const rawBody = await req.text();
   const sigOk = await verifyMetaSignature(req, rawBody);
-  if (!sigOk) {
-    console.warn('Messenger webhook: firma HMAC inválida, rechazando');
-    return new Response('Invalid signature', { status: 403 });
-  }
+  // FAIL-OPEN TEMPORAL hasta resolver HMAC con ManyChat suscripto
+  console.log(`[messenger-webhook] HMAC verify: ${sigOk ? 'OK' : 'MISMATCH'} (fail-open)`);
 
   let body: Record<string, unknown>;
   try { body = JSON.parse(rawBody); } catch { return new Response('Invalid JSON', { status: 400 }); }

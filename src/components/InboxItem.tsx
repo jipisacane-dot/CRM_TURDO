@@ -1,7 +1,6 @@
 import { memo } from 'react';
 import { formatDistanceToNow } from 'date-fns';
 import { es } from 'date-fns/locale';
-import { AGENTS } from '../data/mock';
 import { ChannelIcon } from './ui/ChannelIcon';
 import QualityBadge from './ui/QualityBadge';
 import type { Lead } from '../types';
@@ -10,6 +9,7 @@ interface Props {
   lead: Lead;
   isSelected: boolean;
   unread: number;
+  agentName?: string;
   onSelect: (id: string) => void;
 }
 
@@ -31,9 +31,8 @@ function LeadAvatar({ lead }: { lead: Lead }) {
   );
 }
 
-function InboxItemBase({ lead, isSelected, unread, onSelect }: Props) {
+function InboxItemBase({ lead, isSelected, unread, agentName, onSelect }: Props) {
   const last = lead.messages[lead.messages.length - 1];
-  const agent = lead.assignedTo ? AGENTS.find(a => a.id === lead.assignedTo) : null;
 
   return (
     <div
@@ -68,8 +67,8 @@ function InboxItemBase({ lead, isSelected, unread, onSelect }: Props) {
         )}
         <div className="flex items-center gap-1 mt-0.5">
           <ChannelIcon channel={lead.channel} size="sm" />
-          {agent ? (
-            <span className="text-muted text-xs truncate">{agent.name.split(' ')[0]}</span>
+          {agentName ? (
+            <span className="text-muted text-xs truncate">{agentName.split(' ')[0]}</span>
           ) : (
             <span className="text-crimson-bright text-xs">Sin asignar</span>
           )}
@@ -99,6 +98,7 @@ export const InboxItem = memo(InboxItemBase, (prev, next) => {
     prev.lead === next.lead &&
     prev.isSelected === next.isSelected &&
     prev.unread === next.unread &&
+    prev.agentName === next.agentName &&
     prev.onSelect === next.onSelect
   );
 });
