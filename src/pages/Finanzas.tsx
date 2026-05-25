@@ -13,6 +13,12 @@ import {
   type CashflowMonthly,
   type DBExpense,
 } from '../services/commissions';
+import { getBlueRate } from '../services/finances';
+
+// Categorías que Leti paga típicamente en USD (alquileres, comisiones a
+// vendedores). Para esas, el selector de moneda arranca en USD por defecto.
+// El usuario puede cambiarlo manualmente igual.
+const DEFAULT_USD_CATEGORIES = new Set(['comision', 'sueldo']);
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
 
@@ -43,7 +49,8 @@ export default function Finanzas() {
     fecha: todayISO(),
     category: 'marketing',
     description: '',
-    amount_ars: '',
+    amount: '', // monto en la moneda elegida
+    currency: 'ARS' as 'ARS' | 'USD',
     payment_method: 'transferencia',
     paid_to: '',
     notes: '',
@@ -128,17 +135,45 @@ export default function Finanzas() {
   }, [cashflow]);
 
   const handleSave = async () => {
-    if (!draft.description || !draft.amount_ars) {
-      alert('Completá descripción y monto.');
+    if (!draft.description) {
+      alert('Completá la descripción.');
+      return;
+    }
+    const monto = Number(draft.amount);
+    if (!Number.isFinite(monto) || monto <= 0) {
+      alert('Cargá un monto válido (solo dígitos, sin comas).');
       return;
     }
     setSaving(true);
     try {
+      // Resolver amount_ars y amount_usd según moneda elegida. Si pagó en USD,
+      // guardamos el monto original en amount_usd y convertimos a ARS con el
+      // blue rate del día para que los reportes históricos sigan funcionando.
+      let amount_ars: number;
+      let amount_usd: number | null;
+      if (draft.currency === 'USD') {
+        amount_usd = monto;
+        try {
+          const rate = await getBlueRate();
+          amount_ars = Math.round(monto * rate.promedio);
+        } catch {
+          // Si falla el blue rate, no bloqueamos el guardado — guardamos el
+          // monto original en USD y dejamos amount_ars=0 (el reporte ARS lo
+          // ignora, pero queda el dato real en amount_usd).
+          amount_ars = 0;
+        }
+      } else {
+        amount_usd = null;
+        amount_ars = monto;
+      }
+
       await expensesApi.create({
         fecha: draft.fecha,
         category: draft.category,
         description: draft.description,
-        amount_ars: Number(draft.amount_ars),
+        amount_ars,
+        currency: draft.currency,
+        amount_usd,
         payment_method: draft.payment_method || null,
         paid_to: draft.paid_to || null,
         related_operation_id: null,
@@ -152,7 +187,8 @@ export default function Finanzas() {
         fecha: todayISO(),
         category: 'marketing',
         description: '',
-        amount_ars: '',
+        amount: '',
+        currency: 'ARS',
         payment_method: 'transferencia',
         paid_to: '',
         notes: '',
@@ -163,6 +199,18 @@ export default function Finanzas() {
     } finally {
       setSaving(false);
     }
+  };
+
+  // Cuando cambia la categoría, ajustar la moneda default si aplica
+  const handleCategoryChange = (newCat: string) => {
+    const shouldDefaultUSD = DEFAULT_USD_CATEGORIES.has(newCat);
+    setDraft(d => ({
+      ...d,
+      category: newCat,
+      // Solo cambiar la moneda si el usuario no la tocó manualmente todavía
+      // (criterio simple: si está en ARS y la nueva cat es USD-default, switch)
+      currency: shouldDefaultUSD && d.currency === 'ARS' && !d.amount ? 'USD' : d.currency,
+    }));
   };
 
   const handleDelete = async (id: string) => {
@@ -310,7 +358,7 @@ export default function Finanzas() {
                   <th className="px-4 py-3 font-medium">Descripción</th>
                   <th className="px-4 py-3 font-medium">Pagado a</th>
                   <th className="px-4 py-3 font-medium">Método</th>
-                  <th className="px-4 py-3 font-medium text-right">Monto ARS</th>
+                  <th className="px-4 py-3 font-medium text-right">Monto</th>
                   <th className="px-4 py-3 font-medium"></th>
                 </tr>
               </thead>
@@ -330,7 +378,16 @@ export default function Finanzas() {
                       <td className="px-4 py-3 text-sm text-[#0F172A]">{e.description}</td>
                       <td className="px-4 py-3 text-sm text-muted">{e.paid_to ?? '—'}</td>
                       <td className="px-4 py-3 text-sm text-muted capitalize">{e.payment_method ?? '—'}</td>
-                      <td className="px-4 py-3 text-sm text-right text-[#0F172A] font-semibold tabular-nums">{fmtARS(Number(e.amount_ars))}</td>
+                      <td className="px-4 py-3 text-sm text-right text-[#0F172A] font-semibold tabular-nums">
+                        {e.currency === 'USD' && e.amount_usd != null ? (
+                          <>
+                            USD {Number(e.amount_usd).toLocaleString('es-AR')}
+                            <div className="text-[10px] text-muted font-normal">≈ {fmtARS(Number(e.amount_ars))}</div>
+                          </>
+                        ) : (
+                          fmtARS(Number(e.amount_ars))
+                        )}
+                      </td>
                       <td className="px-4 py-3 text-sm text-right">
                         <button
                           onClick={() => void handleDelete(e.id)}
@@ -374,7 +431,7 @@ export default function Finanzas() {
               <label className="text-sm font-medium text-[#0F172A] mb-1.5 block">Categoría</label>
               <select
                 value={draft.category}
-                onChange={(e) => setDraft({ ...draft, category: e.target.value })}
+                onChange={(e) => handleCategoryChange(e.target.value)}
                 className="w-full bg-white border border-border rounded-xl px-3 py-2 text-sm text-[#0F172A]"
               >
                 {EXPENSE_CATEGORIES.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
@@ -392,16 +449,35 @@ export default function Finanzas() {
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-[1fr_auto_1fr] gap-3 items-end">
             <div>
-              <label className="text-sm font-medium text-[#0F172A] mb-1.5 block">Monto ARS *</label>
+              <label className="text-sm font-medium text-[#0F172A] mb-1.5 block">Monto *</label>
               <input
                 type="number"
-                value={draft.amount_ars}
-                onChange={(e) => setDraft({ ...draft, amount_ars: e.target.value })}
+                value={draft.amount}
+                onChange={(e) => setDraft({ ...draft, amount: e.target.value })}
                 className="w-full bg-white border border-border rounded-xl px-3 py-2 text-sm text-[#0F172A]"
-                placeholder="350000"
+                placeholder={draft.currency === 'USD' ? '200' : '350000'}
               />
+            </div>
+            <div>
+              <label className="text-sm font-medium text-[#0F172A] mb-1.5 block">Moneda</label>
+              <div className="flex bg-bg-input border border-border rounded-xl overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => setDraft({ ...draft, currency: 'ARS' })}
+                  className={`px-3 py-2 text-sm font-medium transition-all ${draft.currency === 'ARS' ? 'bg-crimson text-white' : 'text-muted hover:text-[#0F172A]'}`}
+                >
+                  ARS
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDraft({ ...draft, currency: 'USD' })}
+                  className={`px-3 py-2 text-sm font-medium transition-all ${draft.currency === 'USD' ? 'bg-crimson text-white' : 'text-muted hover:text-[#0F172A]'}`}
+                >
+                  USD
+                </button>
+              </div>
             </div>
             <div>
               <label className="text-sm font-medium text-[#0F172A] mb-1.5 block">Método</label>

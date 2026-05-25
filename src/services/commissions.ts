@@ -479,6 +479,11 @@ export interface DBExpense {
   category: string;
   description: string;
   amount_ars: number;
+  // Moneda en la que se pagó originalmente. Si es 'USD', amount_usd tiene el
+  // monto en dólares y amount_ars guarda la conversión a pesos (blue rate del
+  // día) para que los reportes históricos que suman ARS sigan funcionando.
+  currency: 'ARS' | 'USD';
+  amount_usd: number | null;
   payment_method: string | null;
   paid_to: string | null;
   related_operation_id: string | null;

@@ -219,6 +219,39 @@ Deno.serve(async (req) => {
     }, null, 2), { status: 200, headers: { 'Content-Type': 'application/json' } });
   }
 
+  // Aplicar migration de expenses currency (one-shot)
+  if ((opts as { apply_expenses_currency?: boolean }).apply_expenses_currency) {
+    const sql = `
+      DO $$ BEGIN
+        ALTER TABLE expenses ADD COLUMN IF NOT EXISTS currency text NOT NULL DEFAULT 'ARS';
+      EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+
+      DO $$ BEGIN
+        ALTER TABLE expenses ADD CONSTRAINT expenses_currency_check CHECK (currency IN ('ARS','USD'));
+      EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+      ALTER TABLE expenses ADD COLUMN IF NOT EXISTS amount_usd numeric(14,2);
+      CREATE INDEX IF NOT EXISTS idx_expenses_currency ON expenses(currency) WHERE currency = 'USD';
+    `;
+    // Llamar rpc del service role
+    const { error } = await sb.rpc('exec_sql', { sql });
+    if (error) {
+      return new Response(JSON.stringify({ error: error.message, hint: 'exec_sql RPC puede no existir. Aplicar por dashboard' }), { status: 200 });
+    }
+    return new Response(JSON.stringify({ ok: true, applied: 'expenses_currency' }), { status: 200 });
+  }
+
+  // Listar operations recientes para identificar test rows
+  if ((opts as { list_recent_ops?: boolean }).list_recent_ops) {
+    const { data, error } = await sb.from('operations')
+      .select('id, property_id, precio_venta_usd, status, approval_status, rejected_reason, propietario_nombre, honorarios_totales_usd, honorarios_vendedor_usd, honorarios_captador_usd, created_at, notes, observaciones_extra')
+      .order('created_at', { ascending: false })
+      .limit(20);
+    return new Response(JSON.stringify({ data, error: error?.message }, null, 2), {
+      status: 200, headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
   // Borrar test row de operations
   if ((opts as { delete_op_id?: string }).delete_op_id) {
     const id = (opts as { delete_op_id: string }).delete_op_id;
