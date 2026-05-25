@@ -284,8 +284,32 @@ export default function Operations() {
       alert('Elegí qué vendedor cargó la venta.');
       return;
     }
-    if (!draft.precio_venta_usd) {
-      alert('Cargá el precio de venta.');
+    // Validación numérica explícita: precio_venta_usd debe ser número > 0.
+    // Si Leti pega "86,000" o "$86.000" desde otro lado, Number() devuelve NaN
+    // y Postgres rechaza con "invalid input syntax for type numeric".
+    const precioNum = Number(draft.precio_venta_usd);
+    if (!draft.precio_venta_usd || !Number.isFinite(precioNum) || precioNum <= 0) {
+      alert('Cargá el precio de venta como número (solo dígitos, sin puntos ni comas).');
+      return;
+    }
+    // Validar también los honorarios manuales si los llenaron
+    const validateOptionalNum = (label: string, val: string): string | null => {
+      if (!val) return null;
+      const n = Number(val);
+      if (!Number.isFinite(n) || n < 0) return label;
+      return null;
+    };
+    const numErrors = [
+      validateOptionalNum('Monto seña', draft.monto_sena_usd),
+      validateOptionalNum('Honorarios totales', draft.honorarios_totales_usd),
+      validateOptionalNum('Honorarios vendedor', draft.honorarios_vendedor_usd),
+      validateOptionalNum('Honorarios captador', draft.honorarios_captador_usd),
+      validateOptionalNum('Monto escrituración', draft.monto_escrituracion_usd),
+      validateOptionalNum('Gastos escribanía comprador', draft.gastos_escribania_comprador_usd),
+      validateOptionalNum('Gastos escribanía vendedor', draft.gastos_escribania_vendedor_usd),
+    ].filter(Boolean);
+    if (numErrors.length > 0) {
+      alert(`Revisá estos campos numéricos (sin puntos ni comas): ${numErrors.join(', ')}`);
       return;
     }
     if (draft.status !== 'reservada' && !draft.fecha_boleto) {
@@ -405,8 +429,17 @@ export default function Operations() {
       setCreatedOpDocs([]);
       await refresh();
     } catch (e) {
-      console.error(e);
-      alert('Error al guardar la operación: ' + (e as Error).message);
+      console.error('[operations.create] FAILED. Full error:', e);
+      // El error de Supabase tiene message + details + hint + code. Concatenar todo
+      // para que cuando Leti vea el alert sepamos exactamente qué columna falló.
+      const err = e as { message?: string; details?: string; hint?: string; code?: string };
+      const parts = [
+        err.message,
+        err.details ? `Detalle: ${err.details}` : null,
+        err.hint ? `Pista: ${err.hint}` : null,
+        err.code ? `Código: ${err.code}` : null,
+      ].filter(Boolean);
+      alert('Error al guardar la operación:\n\n' + parts.join('\n'));
     } finally {
       setSaving(false);
     }

@@ -219,6 +219,102 @@ Deno.serve(async (req) => {
     }, null, 2), { status: 200, headers: { 'Content-Type': 'application/json' } });
   }
 
+  // Borrar test row de operations
+  if ((opts as { delete_op_id?: string }).delete_op_id) {
+    const id = (opts as { delete_op_id: string }).delete_op_id;
+    const { error } = await sb.from('operations').delete().eq('id', id);
+    return new Response(JSON.stringify({ deleted: id, error: error?.message }), { status: 200 });
+  }
+
+  // Reproducir bug operation insert
+  if ((opts as { repro_operation?: boolean }).repro_operation) {
+    // Buscar 1 property y 1 agent reales
+    const { data: prop } = await sb.from('properties').select('id').limit(1).single();
+    const { data: agent } = await sb.from('agents').select('id').eq('role', 'agent').limit(1).single();
+    const { data: admin } = await sb.from('agents').select('id').eq('role', 'admin').limit(1).single();
+    if (!prop || !agent) {
+      return new Response(JSON.stringify({ error: 'no prop or agent for repro' }), { status: 200 });
+    }
+
+    const today = new Date().toISOString().slice(0, 10);
+    // Réplica exacta del payload que el frontend envía (Operations.tsx:350)
+    const payload = {
+      property_id: prop.id,
+      captador_id: agent.id,
+      vendedor_id: agent.id,
+      precio_venta_usd: 88600,
+      fecha_boleto: today,
+      fecha_escritura: null,
+      fecha_reserva: today,
+      fecha_vencimiento_reserva: null,
+      monto_sena_usd: null,
+      contact_id: null,
+      status: 'reservada',
+      cancelled_at: null,
+      cancelled_reason: null,
+      approval_status: 'approved',
+      approved_by: admin?.id ?? null,
+      approved_at: null,
+      rejected_reason: null,
+      paid_at: null,
+      agency_commission_pct: 6,
+      propietario_nombre: 'Pablo (test repro)',
+      propietario_telefono: null,
+      is_compartida: false,
+      inmobiliaria_compartida_nombre: null,
+      comision_pct_turdo: 6,
+      comision_captador_pct: 50,
+      honorarios_totales_usd: null,
+      honorarios_vendedor_usd: null,
+      honorarios_captador_usd: null,
+      escribania_nombre: null,
+      monto_escrituracion_usd: null,
+      gastos_escribania_comprador_usd: null,
+      gastos_escribania_vendedor_usd: null,
+      tasador: null,
+      cedula_estado: null,
+      osse: null,
+      arba: null,
+      arm: null,
+      camuzzi: null,
+      edea: null,
+      administracion: null,
+      notes: null,
+      observaciones_extra: null,
+    };
+
+    const { data, error } = await sb.from('operations').insert(payload).select().single();
+    return new Response(JSON.stringify({
+      payload_sent: payload,
+      result_data: data,
+      result_error: error,
+      hint: data ? 'INSERTED — borrarlo manualmente. id arriba' : 'ERROR capturado',
+    }, null, 2), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  }
+
+  // Diagnóstico schema de operations
+  if ((opts as { check_operations_schema?: boolean }).check_operations_schema) {
+    const { data, error } = await sb.from('operations').select('*').limit(1);
+    if (error) {
+      return new Response(JSON.stringify({ error: error.message, hint: 'failed select' }, null, 2), {
+        status: 200, headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    if (!data || data.length === 0) {
+      // Sin filas — intentar insert vacío para forzar error con nombres de columnas
+      const { error: insErr } = await sb.from('operations').insert({} as Record<string, unknown>).select().single();
+      return new Response(JSON.stringify({
+        empty_table: true,
+        insert_empty_error: insErr?.message ?? 'no error',
+        hint: 'la tabla está vacía, no podemos listar columnas via API',
+      }, null, 2), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+    return new Response(JSON.stringify({
+      columns: Object.keys(data[0] as Record<string, unknown>),
+      sample: data[0],
+    }, null, 2), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  }
+
   // Probe específico: pasar subscriber_id y consultar getInfo en ManyChat
   if ((opts as { probe_subscriber_id?: string }).probe_subscriber_id) {
     const subId = (opts as { probe_subscriber_id: string }).probe_subscriber_id;
