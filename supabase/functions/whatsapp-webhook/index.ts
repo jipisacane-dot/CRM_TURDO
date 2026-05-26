@@ -13,11 +13,18 @@ const MANYCHAT_KEY = Deno.env.get('MANYCHAT_API_KEY') ?? '';
 
 // Busca un subscriber en ManyChat que tenga `whatsapp_phone` matcheando el
 // número del contacto. ManyChat crea subscribers automáticamente cuando llega
-// un mensaje que dispara una automatización con keyword (ver "Respuesta
-// predeterminada de WhatsApp"). Una vez creado, lo encontramos por nombre o
-// por listado y guardamos el ID en el contacto del CRM. Sin esto, el código
-// de send-message no puede usar el camino sendContent/sendFlow de ManyChat.
-async function findManyChatSubscriberByPhone(phone: string, name: string): Promise<string | null> {
+// un mensaje que dispara una automatización con keyword. Pero CRÍTICO: tener
+// una flow disparándose con WhatsApp inbound hace que ManyChat ack-ee cada
+// mensaje (status: read) y le clave el visto al cliente. Por eso la flow
+// "Whatsapp Default Reply" debe quedar PAUSADA. Sin la flow no hay subscriber
+// auto-creado, entonces:
+//   1. Intentamos findByName (puede que ManyChat aún lo tenga shadow-trackeado)
+//   2. Si no existe, lo creamos vía createSubscriber API directamente. Así
+//      tenemos subscriber_id para que send-message use ManyChat sendContent.
+async function findOrCreateManyChatSubscriber(
+  phone: string,
+  name: string,
+): Promise<string | null> {
   if (!MANYCHAT_KEY) return null;
   // Normalizar a formato +5491138113962
   const normalizedPhone = phone.startsWith('+') ? phone : `+${phone.replace(/\D/g, '')}`;
@@ -37,6 +44,47 @@ async function findManyChatSubscriberByPhone(phone: string, name: string): Promi
     } catch (e) {
       console.warn('MC findByName err:', e);
     }
+  }
+
+  // Estrategia 2: crear el subscriber vía Phone Import API. Requiere que
+  // "Phone Import" esté habilitado en la cuenta de ManyChat (ya está pedido
+  // y aprobado). Si el wa_id ya existe, ManyChat devuelve "already exists" —
+  // en ese caso significa que está en otra cuenta o con otro nombre, no
+  // podemos linkearlo desde acá. Retornamos null y send-message cae al
+  // fallback de Cloud API.
+  const parts = name.trim().split(/\s+/);
+  const firstName = parts[0] && parts[0] !== 'Sin' ? parts[0] : 'Contacto';
+  const lastName = parts.length > 1 && parts[0] !== 'Sin' ? parts.slice(1).join(' ') : '-';
+  try {
+    const r = await fetch('https://api.manychat.com/fb/subscriber/createSubscriber', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${MANYCHAT_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        whatsapp_phone: normalizedPhone,
+        first_name: firstName,
+        last_name: lastName,
+        has_opt_in_sms: false,
+        has_opt_in_email: false,
+        consent_phrase: 'Contact opted in by sending WhatsApp message to business.',
+      }),
+    });
+    const raw = await r.text();
+    let j: Record<string, unknown>;
+    try { j = JSON.parse(raw); } catch { return null; }
+    if (r.ok && j.status === 'success') {
+      const id = (j.data as Record<string, unknown> | undefined)?.id;
+      if (id) {
+        console.log(`[WA] createSubscriber OK ${normalizedPhone} → ${id}`);
+        return String(id);
+      }
+    } else {
+      console.log(`[WA] createSubscriber failed for ${normalizedPhone}: ${raw.slice(0, 200)}`);
+    }
+  } catch (e) {
+    console.warn('[WA] createSubscriber err:', e);
   }
   return null;
 }
@@ -274,27 +322,28 @@ Deno.serve(async (req) => {
         if (rpcErr || !contactIdRpc) { console.error('find_or_create_contact err:', rpcErr); continue; }
         const contactId: string = contactIdRpc as string;
 
-        // Lookup ManyChat subscriber_id con retries. ManyChat puede tardar
-        // varios segundos en crear el subscriber después de que dispara la
-        // automatización. Reintentamos a los 3s, 15s, 45s, 120s para
-        // capturar incluso casos lentos.
+        // Linkear con ManyChat. La flow "Whatsapp Default Reply" debe estar
+        // PAUSADA (sino ManyChat ack-ea y mete visto al cliente). Sin la flow,
+        // ManyChat no auto-crea subscribers. Entonces probamos:
+        //   1. findByName por si ManyChat lo tiene de antes
+        //   2. createSubscriber vía Phone Import API si no existe
+        // Esto reemplaza el retry largo de findByName (que dependía de que la
+        // flow ejecutara).
         (async () => {
           const { data: existing } = await supabase
             .from('contacts').select('manychat_subscriber_id').eq('id', contactId).maybeSingle();
           if (existing?.manychat_subscriber_id) return;
 
-          const delays = [3000, 15000, 45000, 120000];
-          for (const delay of delays) {
-            await new Promise(r => setTimeout(r, delay));
-            const mcId = await findManyChatSubscriberByPhone(phone, name);
-            if (mcId) {
-              await supabase.from('contacts').update({ manychat_subscriber_id: mcId }).eq('id', contactId);
-              console.log(`[WA] linked contact ${contactId} → MC ${mcId} (after ${delay}ms)`);
-              return;
-            }
+          // Pequeño delay por si justo ManyChat estaba indexando el inbound
+          await new Promise(r => setTimeout(r, 2000));
+          const mcId = await findOrCreateManyChatSubscriber(phone, name);
+          if (mcId) {
+            await supabase.from('contacts').update({ manychat_subscriber_id: mcId }).eq('id', contactId);
+            console.log(`[WA] linked contact ${contactId} → MC ${mcId}`);
+          } else {
+            console.log(`[WA] could not link ${contactId} in ManyChat (send-message caerá a Cloud API fallback)`);
           }
-          console.log(`[WA] could not find ${contactId} in ManyChat after retries`);
-        })().catch(e => console.error('MC lookup err:', e));
+        })().catch(e => console.error('MC link err:', e));
 
         // Construir el record de mensaje
         const msgRecord: Record<string, unknown> = {

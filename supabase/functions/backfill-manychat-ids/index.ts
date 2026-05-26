@@ -219,6 +219,124 @@ Deno.serve(async (req) => {
     }, null, 2), { status: 200, headers: { 'Content-Type': 'application/json' } });
   }
 
+  // Test send Cloud API directo para reproducir el error #200
+  if ((opts as { test_cloud_api_send?: string }).test_cloud_api_send) {
+    const toPhone = (opts as { test_cloud_api_send: string }).test_cloud_api_send;
+    const waToken = Deno.env.get('WHATSAPP_TOKEN') ?? Deno.env.get('FB_PAGE_ACCESS_TOKEN');
+    const phoneNumberId = Deno.env.get('WHATSAPP_PHONE_NUMBER_ID') ?? '216844138185123';
+
+    const payload = {
+      messaging_product: 'whatsapp',
+      to: toPhone.replace(/\D/g, ''),
+      type: 'text',
+      text: { body: '[Diagnóstico CRM Turdo — ignorá este mensaje, es prueba técnica]' },
+    };
+
+    const resp = await fetch(`https://graph.facebook.com/v22.0/${phoneNumberId}/messages`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${waToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const respText = await resp.text();
+    return new Response(JSON.stringify({
+      sent_to: toPhone,
+      http_status: resp.status,
+      response: respText,
+    }, null, 2), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  }
+
+  // Diagnóstico del token de WhatsApp: chequear permisos y owner
+  if ((opts as { check_wa_token?: boolean }).check_wa_token) {
+    const waToken = Deno.env.get('WHATSAPP_TOKEN') ?? Deno.env.get('FB_PAGE_ACCESS_TOKEN');
+    if (!waToken) {
+      return new Response(JSON.stringify({ error: 'no WHATSAPP_TOKEN nor FB_PAGE_ACCESS_TOKEN env var' }), { status: 200 });
+    }
+    const phoneNumberId = Deno.env.get('WHATSAPP_PHONE_NUMBER_ID') ?? '216844138185123';
+
+    // 1. Token owner info
+    const meResp = await fetch(`https://graph.facebook.com/v22.0/me?access_token=${waToken}`);
+    const meData = await meResp.json();
+
+    // 2. Debug token (qué scopes tiene)
+    const debugResp = await fetch(`https://graph.facebook.com/v22.0/debug_token?input_token=${waToken}&access_token=${waToken}`);
+    const debugData = await debugResp.json();
+
+    // 3. Phone number info accesible con este token
+    const phoneResp = await fetch(`https://graph.facebook.com/v22.0/${phoneNumberId}?access_token=${waToken}`);
+    const phoneData = await phoneResp.json();
+
+    return new Response(JSON.stringify({
+      token_first_chars: waToken.slice(0, 30) + '...',
+      me: meData,
+      debug_token: debugData,
+      phone_number_access: phoneData,
+    }, null, 2), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  }
+
+  // Diagnóstico outbound: ver qué método usaron los últimos sends WhatsApp
+  if ((opts as { check_wa_outbound?: boolean }).check_wa_outbound) {
+    const since = new Date(Date.now() - 7 * 86400_000).toISOString();
+    const { data, error } = await sb.from('messages')
+      .select('id, contact_id, meta_mid, delivery_status, delivery_error, created_at')
+      .eq('direction', 'out')
+      .eq('channel', 'whatsapp')
+      .gte('created_at', since)
+      .order('created_at', { ascending: false })
+      .limit(60);
+
+    // Para cada mensaje exitoso ver si el contact tenía manychat_subscriber_id
+    const enriched = await Promise.all((data ?? []).map(async (m) => {
+      const { data: c } = await sb.from('contacts').select('manychat_subscriber_id, phone').eq('id', m.contact_id as string).maybeSingle();
+      // meta_mid puede tener prefijo según el método
+      const mid = (m.meta_mid as string) || '';
+      let probableMethod = 'unknown';
+      if (mid.startsWith('wamid.')) probableMethod = 'cloud_api_direct';
+      else if (mid.startsWith('mc_')) probableMethod = 'manychat';
+      else if (!mid) probableMethod = c?.manychat_subscriber_id ? 'manychat_assumed' : 'cloud_api_assumed';
+      return {
+        delivery_status: m.delivery_status,
+        delivery_error: (m.delivery_error as string)?.slice(0, 150),
+        method: probableMethod,
+        has_mc_id: !!c?.manychat_subscriber_id,
+        created_at: m.created_at,
+      };
+    }));
+
+    const summary: Record<string, number> = {};
+    for (const e of enriched) {
+      const k = `${e.method}/${e.delivery_status}`;
+      summary[k] = (summary[k] ?? 0) + 1;
+    }
+
+    return new Response(JSON.stringify({ summary, total: enriched.length, recent_samples: enriched.slice(0, 15), error: error?.message }, null, 2), {
+      status: 200, headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  // Diagnóstico: qué webhook recibe los mensajes WhatsApp inbound recientes
+  if ((opts as { check_wa_webhook_paths?: boolean }).check_wa_webhook_paths) {
+    const since = new Date(Date.now() - 24 * 3600_000).toISOString();
+    const { data, error } = await sb.from('messages')
+      .select('id, contact_id, meta_mid, content, created_at')
+      .eq('direction', 'in')
+      .eq('channel', 'whatsapp')
+      .gte('created_at', since)
+      .order('created_at', { ascending: false })
+      .limit(20);
+    const breakdown: Record<string, number> = { wamid: 0, mc_: 0, other: 0 };
+    for (const m of data ?? []) {
+      const mid = (m.meta_mid as string) || '';
+      if (mid.startsWith('wamid.')) breakdown.wamid++;
+      else if (mid.startsWith('mc_')) breakdown.mc_++;
+      else breakdown.other++;
+    }
+    return new Response(JSON.stringify({
+      breakdown,
+      sample: (data ?? []).slice(0, 10).map(m => ({ meta_mid: m.meta_mid, created_at: m.created_at, content: ((m.content as string) || '').slice(0, 30) })),
+      error: error?.message,
+    }, null, 2), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  }
+
   // Aplicar migration de expenses currency (one-shot)
   if ((opts as { apply_expenses_currency?: boolean }).apply_expenses_currency) {
     const sql = `
