@@ -7,6 +7,54 @@ const supabase = createClient(
 
 const VERIFY_TOKEN = Deno.env.get('IG_WEBHOOK_VERIFY_TOKEN') ?? 'turdo_crm_verify_2026';
 const META_APP_SECRET = Deno.env.get('META_APP_SECRET') ?? '';
+const FB_PAGE_TOKEN = Deno.env.get('FB_PAGE_ACCESS_TOKEN') ?? '';
+const MANYCHAT_KEY = Deno.env.get('MANYCHAT_API_KEY') ?? '';
+
+// Resuelve nombre/username del usuario de IG desde su PSID.
+// Mejora UX (los contactos dejan de aparecer como "Sin nombre") y habilita el
+// lookup en ManyChat por nombre.
+async function resolveIGProfile(psid: string): Promise<{ name: string | null; username: string | null }> {
+  if (!FB_PAGE_TOKEN) return { name: null, username: null };
+  try {
+    const r = await fetch(`https://graph.facebook.com/v20.0/${psid}?fields=name,username&access_token=${FB_PAGE_TOKEN}`);
+    if (!r.ok) return { name: null, username: null };
+    const d = await r.json();
+    return { name: d.name ?? null, username: d.username ?? null };
+  } catch {
+    return { name: null, username: null };
+  }
+}
+
+// Busca el subscriber de ManyChat asociado al contacto IG. Estrategias:
+//   1. findByName con el nombre real (si IG nos dio uno bueno)
+//   2. findByName con el username
+// Si encuentra match, devuelve el ManyChat subscriber id. La idea es linkear
+// los contactos que ya pasaron por algún flow de IG (ManyChat los tiene como
+// subscribers pero el CRM no sabía el ID). NO crea subscribers (ManyChat no
+// expone API para crear IG subscribers, tienen que llegar via flow).
+async function findManyChatIGSubscriber(name: string | null, username: string | null): Promise<string | null> {
+  if (!MANYCHAT_KEY) return null;
+  const candidates = [name, username].filter((s): s is string => !!s && s !== 'Sin nombre' && !/^\d+$/.test(s));
+  for (const term of candidates) {
+    try {
+      const r = await fetch(
+        `https://api.manychat.com/fb/subscriber/findByName?name=${encodeURIComponent(term)}`,
+        { headers: { Authorization: `Bearer ${MANYCHAT_KEY}` } }
+      );
+      if (!r.ok) continue;
+      const j = await r.json();
+      const list = (j.data ?? []) as Array<Record<string, unknown>>;
+      // Filtramos: solo subscribers que tienen IG real (no WSP ni Messenger).
+      const igMatch = list.find(s => s.ig_username || s.ig_id);
+      if (igMatch?.id) {
+        return String(igMatch.id);
+      }
+    } catch (e) {
+      console.warn('[IG] MC findByName err:', e);
+    }
+  }
+  return null;
+}
 
 async function verifyMetaSignature(req: Request, rawBody: string): Promise<boolean> {
   if (!META_APP_SECRET) {
@@ -109,6 +157,11 @@ Deno.serve(async (req) => {
       if (!senderId || message?.is_echo) continue;
       if (!text && attachments.length === 0) continue;
 
+      // Resolver nombre/username real del IG (mejora UX). El profile fetch
+      // puede fallar silenciosamente; en ese caso queda "Sin nombre".
+      const profile = await resolveIGProfile(senderId);
+      const resolvedName = profile.name ?? profile.username ?? 'Sin nombre';
+
       // Lookup-then-insert: si el mismo humano ya escribió por otro canal,
       // reutilizamos su contact_id (matchea por phone normalizado o email,
       // pero como IG no nos da phone/email del usuario, solo matchea por
@@ -116,7 +169,7 @@ Deno.serve(async (req) => {
       const { data: contactIdRpc, error: contactError } = await supabase.rpc('find_or_create_contact', {
         p_channel: 'instagram',
         p_channel_id: senderId,
-        p_name: 'Sin nombre',
+        p_name: resolvedName,
         p_phone: null,
         p_email: null,
         p_avatar_url: null,
@@ -128,6 +181,41 @@ Deno.serve(async (req) => {
         continue;
       }
       const contact = { id: contactIdRpc as string };
+
+      // Auto-link a ManyChat: si el contacto no tiene manychat_subscriber_id
+      // todavía, intentamos buscarlo por nombre. Solo lo hacemos para los IG
+      // que ManyChat ya conoce (subscribers de flows previos). NO crea nuevos
+      // subscribers — ManyChat no expone API para eso en IG.
+      // Esto baja el fail rate de IG (75% hoy → ~30-40% una vez Meta aprueba
+      // la capability instagram_manage_messages).
+      try {
+        const { data: c } = await supabase
+          .from('contacts')
+          .select('manychat_subscriber_id, name, ig_psid')
+          .eq('id', contact.id)
+          .single();
+        const updates: Record<string, unknown> = {};
+        // Si el contacto vino con "Sin nombre" pero ahora resolvimos uno, actualizamos
+        if (resolvedName !== 'Sin nombre' && (!c?.name || c.name === 'Sin nombre')) {
+          updates.name = resolvedName;
+        }
+        // Guardar el PSID en su columna dedicada (para futuras consultas)
+        if (!c?.ig_psid) {
+          updates.ig_psid = senderId;
+        }
+        if (!c?.manychat_subscriber_id) {
+          const mcId = await findManyChatIGSubscriber(profile.name, profile.username);
+          if (mcId) {
+            updates.manychat_subscriber_id = mcId;
+            console.log(`[IG] auto-linked ${contact.id} → MC ${mcId}`);
+          }
+        }
+        if (Object.keys(updates).length > 0) {
+          await supabase.from('contacts').update(updates).eq('id', contact.id);
+        }
+      } catch (e) {
+        console.warn('[IG] auto-link err:', e);
+      }
 
       const metaMid = (message?.mid as string) ?? `ig_${senderId}_${Date.now()}`;
 
