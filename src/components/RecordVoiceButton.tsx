@@ -13,13 +13,19 @@ interface Props {
   disabled?: boolean;
 }
 
-// MediaRecorder mime preference. iOS Safari soporta audio/mp4. Chrome/Firefox webm/opus.
+// MediaRecorder mime preference. CRÍTICO: WhatsApp Cloud API rechaza audio/webm
+// (Chrome desktop default), solo acepta aac/mp4/amr/mpeg/ogg. Priorizamos ogg
+// (soportado por Chrome desktop) antes que webm. iOS Safari soporta mp4 nativo
+// que también funciona.
 function pickMimeType(): { mime: string; ext: string } {
   const candidates: Array<{ mime: string; ext: string }> = [
-    { mime: 'audio/mp4', ext: 'm4a' },
+    { mime: 'audio/mp4', ext: 'm4a' },              // iOS Safari, también desktop
+    { mime: 'audio/ogg;codecs=opus', ext: 'ogg' },  // Chrome desktop + Firefox — WSP OK
+    { mime: 'audio/ogg', ext: 'ogg' },              // fallback ogg
+    // Los siguientes son fallbacks de último recurso, WhatsApp los rechaza pero
+    // al menos quedan guardados en el chat del CRM
     { mime: 'audio/webm;codecs=opus', ext: 'webm' },
     { mime: 'audio/webm', ext: 'webm' },
-    { mime: 'audio/ogg;codecs=opus', ext: 'ogg' },
   ];
   for (const c of candidates) {
     if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(c.mime)) return c;
