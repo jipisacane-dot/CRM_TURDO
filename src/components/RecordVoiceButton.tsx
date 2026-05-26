@@ -154,7 +154,12 @@ export default function RecordVoiceButton({ contactId, agentId, channel, onSent,
       onSent();
       if (data?.delivery && !data.delivery.ok) {
         const detail = data.delivery.error ?? '';
-        alert(`Audio guardado en el chat, pero el envío al canal falló:\n\n${detail.slice(0, 300)}`);
+        const outsideWindow = data.delivery.outside_window === true || /24 hour|message tag|last interaction was over/i.test(detail);
+        if (outsideWindow) {
+          alert('No se puede enviar audio a este contacto.\n\nWhatsApp solo permite enviar libremente dentro de las 24hs desde el último mensaje del cliente. Este contacto te escribió hace más de 24hs.\n\nMandale primero un mensaje (que tampoco le va a llegar si pasaron las 24hs — esto aplica a TODO) o esperá que él te escriba.');
+        } else {
+          alert(`Audio guardado en el chat, pero el envío al canal falló:\n\n${detail.slice(0, 300)}`);
+        }
       }
       cancelRecording();
     } catch (e) {

@@ -462,6 +462,29 @@ export default function Inbox() {
                 </span>
               </div>
             )}
+
+            {/* Banner cuando el último mensaje INBOUND del cliente es >24h.
+                Regla de Meta WhatsApp: solo se puede enviar libre dentro de
+                ventana 24h. Pasada esa, solo templates. Avisamos al vendor
+                ANTES de que grabe audios o escriba mensajes que van a rebotar. */}
+            {(() => {
+              if (selected.channel !== 'whatsapp') return null;
+              const lastInbound = selected.messages
+                .filter(m => m.direction === 'in')
+                .reduce<string | null>((latest, m) => !latest || m.timestamp > latest ? m.timestamp : latest, null);
+              if (!lastInbound) return null;
+              const hoursSince = (Date.now() - new Date(lastInbound).getTime()) / 3_600_000;
+              if (hoursSince < 24) return null;
+              const days = Math.floor(hoursSince / 24);
+              return (
+                <div className="mb-3 px-3 py-2 bg-amber-50 border border-amber-300 rounded-lg text-xs text-amber-800 flex items-start gap-2">
+                  <span className="flex-shrink-0 mt-0.5">⏰</span>
+                  <span>
+                    <strong>Fuera de ventana de 24hs.</strong> El cliente te escribió hace {days >= 1 ? `${days}d` : `${Math.floor(hoursSince)}h`}. WhatsApp NO va a entregar mensajes libres (texto, audio, foto, video) hasta que el cliente te escriba primero. Mandalo desde WhatsApp Business app si es urgente.
+                  </span>
+                </div>
+              );
+            })()}
             {sendError && (
               <div className="mb-3 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-600 flex items-start gap-2">
                 <span className="flex-shrink-0 mt-0.5">⚠</span>

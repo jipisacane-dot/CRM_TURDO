@@ -120,7 +120,12 @@ export default function AttachMediaButton({ contactId, agentId, channel, onSent,
 
       if (data?.delivery && !data.delivery.ok) {
         const detail = data.delivery.error ?? '';
-        alert(`Archivo guardado en el chat, pero el envío al canal falló:\n\n${detail.slice(0, 300)}`);
+        const outsideWindow = data.delivery.outside_window === true || /24 hour|message tag|last interaction was over/i.test(detail);
+        if (outsideWindow) {
+          alert(`No se puede enviar ${preview.type} a este contacto.\n\nWhatsApp solo permite enviar libremente dentro de las 24hs desde el último mensaje del cliente. Este contacto te escribió hace más de 24hs.\n\nSi querés contactarlo, mandale primero un mensaje de texto template (cuando estén configurados) o esperá que él te escriba.`);
+        } else {
+          alert(`Archivo guardado en el chat, pero el envío al canal falló:\n\n${detail.slice(0, 300)}`);
+        }
       }
       onCancel();
     } catch (e) {
