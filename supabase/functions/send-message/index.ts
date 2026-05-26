@@ -191,45 +191,39 @@ async function sendManyChatContentWA(
     messages.push({ type: 'text', text });
   }
 
-  // Intentamos 2 veces: primero sin tag (ventana 24h normal), después con
-  // message_tag HUMAN_AGENT (extiende a 7 días — para conversaciones humanas).
-  // El HUMAN_AGENT está pensado por Meta para casos de live chat support y
-  // SÍ aplica a WhatsApp. Solo se permite cuando hubo una interacción humana
-  // previa (que siempre tenemos cuando un vendor responde).
-  for (const tag of [null, 'HUMAN_AGENT']) {
-    const body: Record<string, unknown> = {
-      subscriber_id: Number(subscriberId),
-      data: { version: 'v2', content: { messages } },
-    };
-    if (tag) body.message_tag = tag;
+  // NOTA: ManyChat NO acepta message_tag (ej. HUMAN_AGENT) para WhatsApp.
+  // Solo lo acepta para Messenger. Para WhatsApp fuera de ventana 24h, la
+  // única salida es usar templates aprobados por Meta — eso requiere setup
+  // separado en el WhatsApp Business Manager.
+  const body: Record<string, unknown> = {
+    subscriber_id: Number(subscriberId),
+    data: { version: 'v2', content: { messages } },
+  };
 
-    const resp = await fetch('https://api.manychat.com/fb/sending/sendContent', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${MANYCHAT_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    const raw = await resp.text();
-    let result: Record<string, unknown>;
-    try { result = JSON.parse(raw); } catch { result = { status: 'error', message: raw.slice(0, 200) }; }
-    console.log(`ManyChat sendContent WA tag=${tag ?? 'none'} status=${resp.status} type=${media?.type ?? 'text'} body=${JSON.stringify(result).slice(0,200)}`);
+  const resp = await fetch('https://api.manychat.com/fb/sending/sendContent', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${MANYCHAT_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const raw = await resp.text();
+  let result: Record<string, unknown>;
+  try { result = JSON.parse(raw); } catch { result = { status: 'error', message: raw.slice(0, 200) }; }
+  // Log COMPLETO sin truncar — ManyChat suele poner el detail real
+  // en result.details.messages[]
+  console.log(`ManyChat sendContent WA status=${resp.status} type=${media?.type ?? 'text'} url=${media?.url?.slice(0, 80) ?? '-'} fullBody=${JSON.stringify(result)}`);
 
-    if (resp.ok && result?.status === 'success') return { ok: true };
+  if (resp.ok && result?.status === 'success') return { ok: true };
 
-    // Detectar errores de ventana 24h
-    const fullJson = JSON.stringify(result).toLowerCase();
-    const isWindowError = fullJson.includes('24 hour') || fullJson.includes('outside') || fullJson.includes('message tag') || fullJson.includes('last interaction was over');
+  // Detectar errores de ventana 24h
+  const fullJson = JSON.stringify(result).toLowerCase();
+  const isWindowError = fullJson.includes('24 hour') || fullJson.includes('outside') || fullJson.includes('message tag') || fullJson.includes('last interaction was over');
 
-    // Si NO es error de ventana → no tiene sentido reintentar con tag
-    if (!isWindowError) {
-      return { ok: false, error: `sendContent: ${result?.message ?? JSON.stringify(result)}`, outsideWindow: false };
-    }
-    // Si ya probamos con HUMAN_AGENT y falló → devolver outsideWindow
-    if (tag === 'HUMAN_AGENT') {
-      return { ok: false, error: `sendContent: ${result?.message ?? JSON.stringify(result)}`, outsideWindow: true };
-    }
-    // Si fue null y dio window → loop continúa con HUMAN_AGENT
-  }
-  return { ok: false, error: 'unexpected', outsideWindow: true };
+  // Componer mensaje de error que SÍ incluya los details
+  const details = (result as { details?: { messages?: unknown[] } }).details;
+  const detailStr = details?.messages ? JSON.stringify(details.messages).slice(0, 300) : '';
+  const errMsg = `${result?.message ?? 'unknown'}${detailStr ? ` | details: ${detailStr}` : ''}`;
+
+  return { ok: false, error: `sendContent: ${errMsg}`, outsideWindow: isWindowError };
 }
 
 async function setMCField(subscriberId: number, fieldId: number, value: string): Promise<{ ok: boolean; error?: string }> {
