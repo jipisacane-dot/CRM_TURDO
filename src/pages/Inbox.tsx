@@ -15,6 +15,7 @@ import MergeContactsModal from '../components/MergeContactsModal';
 import QualityBadge, { QualityFilter } from '../components/ui/QualityBadge';
 import MessageMedia from '../components/ui/MessageMedia';
 import { pipelineStagesApi, pipelineApi, type PipelineStage } from '../services/pipeline';
+import { db } from '../services/supabase';
 import type { Channel, Lead } from '../types';
 import { format } from 'date-fns';
 
@@ -55,7 +56,32 @@ export default function Inbox() {
   const [stages, setStages] = useState<PipelineStage[]>([]);
   const [changingStage, setChangingStage] = useState(false);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
+  // Editar teléfono del contacto (caso típico: lead con número mal cargado
+  // del form de Meta, vendedor lo corrige tras pedirle bien al cliente).
+  const [editingPhone, setEditingPhone] = useState(false);
+  const [phoneInput, setPhoneInput] = useState('');
+  const [savingPhone, setSavingPhone] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const handleSavePhone = async () => {
+    if (!selected) return;
+    // Normalizar: solo dígitos y +
+    const normalized = phoneInput.trim().replace(/[^\d+]/g, '');
+    if (normalized && normalized.replace(/\D/g, '').length < 8) {
+      alert('Número muy corto — revisalo. Ej: +5492235252984');
+      return;
+    }
+    setSavingPhone(true);
+    try {
+      await db.contacts.update(selected.id, { phone: normalized || null });
+      setEditingPhone(false);
+      await refreshLeads();
+    } catch (e) {
+      alert('Error al guardar teléfono: ' + (e as Error).message);
+    } finally {
+      setSavingPhone(false);
+    }
+  };
 
   useEffect(() => {
     void pipelineStagesApi.list().then(setStages);
@@ -280,8 +306,47 @@ export default function Inbox() {
               </div>
               <div className="flex items-center gap-2 flex-wrap">
                 <ChannelIcon channel={selected.channel} size="sm" showLabel />
-                {selected.phone && (
-                  <span className="text-muted text-xs font-mono">{selected.phone}</span>
+                {editingPhone ? (
+                  <div className="flex items-center gap-1">
+                    <input
+                      autoFocus
+                      type="tel"
+                      value={phoneInput}
+                      onChange={(e) => setPhoneInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') void handleSavePhone();
+                        if (e.key === 'Escape') setEditingPhone(false);
+                      }}
+                      placeholder="+5492235252984"
+                      className="bg-bg-input border border-crimson rounded px-2 py-0.5 text-xs font-mono text-white w-44 outline-none"
+                      disabled={savingPhone}
+                    />
+                    <button
+                      onClick={() => void handleSavePhone()}
+                      disabled={savingPhone}
+                      className="text-xs text-emerald-400 hover:text-emerald-300 px-1.5 py-0.5 disabled:opacity-50"
+                      title="Guardar"
+                    >
+                      {savingPhone ? '...' : '✓'}
+                    </button>
+                    <button
+                      onClick={() => setEditingPhone(false)}
+                      disabled={savingPhone}
+                      className="text-xs text-muted hover:text-white px-1.5 py-0.5"
+                      title="Cancelar"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => { setPhoneInput(selected.phone ?? ''); setEditingPhone(true); }}
+                    className="text-muted text-xs font-mono hover:text-white transition-colors flex items-center gap-1 group"
+                    title="Editar teléfono"
+                  >
+                    {selected.phone || <span className="italic">Sin teléfono</span>}
+                    <span className="opacity-0 group-hover:opacity-100 transition-opacity text-[10px]">✏️</span>
+                  </button>
                 )}
                 {selected.propertyTitle && <span className="text-muted text-xs truncate">{selected.propertyTitle}</span>}
               </div>
