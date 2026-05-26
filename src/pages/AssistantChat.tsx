@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useApp } from '../contexts/AppContext';
+import { supabase } from '../services/supabase';
 
 interface UIMessage {
   role: 'user' | 'assistant';
@@ -76,12 +77,20 @@ export default function AssistantChat() {
       const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
       const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
 
+      // El edge function requireAuth rechaza el anon_key directo (anti abuse).
+      // Necesita el access_token del usuario logueado. Si no hay sesión, fail temprano.
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData.session?.access_token;
+      if (!accessToken) {
+        throw new Error('Sesión expirada. Salí y volvé a iniciar sesión.');
+      }
+
       const res = await fetch(`${supabaseUrl}/functions/v1/assistant-chat`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'apikey': anonKey,
-          'Authorization': `Bearer ${anonKey}`,
+          'Authorization': `Bearer ${accessToken}`,
         },
         body: JSON.stringify({ history, question: text, role: currentUser.role, user_email: currentUser.email, agent_id: currentUser.dbId ?? null }),
       });
