@@ -16,13 +16,20 @@ interface ApiMessage {
 const STORAGE_KEY = 'turdo_assistant_chat_v1';
 const MAX_HISTORY = 10; // últimos 10 mensajes (5 turnos) para mantener costo bajo
 
-const SUGGESTIONS = [
+const SUGGESTIONS_ADMIN = [
   '¿Cómo viene el equipo este mes?',
   '¿Cuántos leads tenemos sin asignar?',
   '¿Cuál vendedor responde más rápido?',
   '¿Qué canal trae más leads?',
   '¿Cuánto vamos a facturar este mes?',
   '¿Hay leads sin responder hace más de 24hs?',
+];
+
+const SUGGESTIONS_AGENT = [
+  '¿Qué propiedades hay disponibles en Plaza Mitre?',
+  '¿Cuántas propiedades reservadas tenemos?',
+  '¿Quiénes son los vendedores activos del equipo?',
+  'Recordá que prefiero atender por la tarde',
 ];
 
 export default function AssistantChat() {
@@ -153,16 +160,9 @@ export default function AssistantChat() {
     }
   };
 
-  if (!isAdmin) {
-    return (
-      <div className="p-5 md:p-8">
-        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-6 text-center">
-          <p className="text-amber-900 font-medium">El Asistente IA es exclusivo para Leticia (admin) por ahora.</p>
-          <p className="text-amber-700 text-sm mt-1">Próximamente vamos a habilitarlo también para vendedores.</p>
-        </div>
-      </div>
-    );
-  }
+  // Asistente disponible para admin (acceso total) y vendedores (acceso
+  // limitado: solo propiedades, equipo y memoria personal — el backend
+  // valida y rechaza tools sensibles).
 
   return (
     <div className="flex flex-col h-[calc(100dvh-3.5rem)] md:h-[calc(100vh-2rem)] max-w-3xl mx-auto p-4 md:p-6">
@@ -199,7 +199,7 @@ export default function AssistantChat() {
             <h2 className="text-base font-semibold text-[#0F172A] mb-1">¿En qué te ayudo, Leticia?</h2>
             <p className="text-muted text-xs mb-6">Probá con una de estas preguntas o escribí la tuya</p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-w-xl mx-auto">
-              {SUGGESTIONS.map(s => (
+              {(isAdmin ? SUGGESTIONS_ADMIN : SUGGESTIONS_AGENT).map(s => (
                 <button
                   key={s}
                   onClick={() => void ask(s)}

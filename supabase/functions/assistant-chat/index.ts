@@ -81,6 +81,16 @@ const TOOLS = [
   { name: 'olvidar', description: 'Borra un hecho de memoria por id. Usalo si el usuario dice "olvidate eso" o "ya no aplica".', input_schema: { type: 'object', properties: { memory_id: { type: 'string' } }, required: ['memory_id'] } },
 ];
 
+// Tools que se permiten a vendedores (no expone data de otros vendedores
+// ni stats gerenciales). Admin tiene acceso a TOOLS completo. Si un vendedor
+// pide algo que use otra tool, Claude responde "no tengo acceso a eso".
+const AGENT_ALLOWED_TOOLS = new Set([
+  'consultar_propiedades',
+  'consultar_vendedores',
+  'recordar',
+  'olvidar',
+]);
+
 // ── Implementación tools ────────────────────────────────────────────────────
 
 let _currentUserEmail = '';
@@ -294,6 +304,7 @@ async function streamClaude(
   messages: ChatMessage[],
   systemPrompt: string,
   send: (event: string, data: unknown) => void,
+  allowedTools: typeof TOOLS = TOOLS,
 ): Promise<StreamingTurnResult> {
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -307,7 +318,7 @@ async function streamClaude(
       max_tokens: 800,
       stream: true,
       system: [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }],
-      tools: TOOLS,
+      tools: allowedTools,
       messages,
     }),
   });
@@ -410,8 +421,12 @@ Deno.serve(async (req: Request) => {
   if (question.length > 4000) {
     return new Response(JSON.stringify({ error: 'Pregunta demasiado larga (max 4000 chars)' }), { status: 400, headers: { ...cors, 'Content-Type': 'application/json' } });
   }
-  if (body.role !== 'admin') {
-    return new Response(JSON.stringify({ error: 'Solo admin' }), { status: 403, headers: { ...cors, 'Content-Type': 'application/json' } });
+  // Hasta 25/05: solo admin. Ahora: vendedores también, pero con whitelist
+  // chica de tools que NO exponen datos de otros vendedores ni stats
+  // gerenciales. Admin sigue con acceso total.
+  const isAdmin = body.role === 'admin';
+  if (!isAdmin && body.role !== 'agent') {
+    return new Response(JSON.stringify({ error: 'Rol no autorizado' }), { status: 403, headers: { ...cors, 'Content-Type': 'application/json' } });
   }
   // Limitar tamaño del historial (evita prompts gigantes que drainen Claude)
   if (Array.isArray(body.history) && body.history.length > 50) {
@@ -435,6 +450,15 @@ Deno.serve(async (req: Request) => {
           const memText = memories.map(m => `[id:${m.id}] (${m.category}, ${m.importance}/5): ${m.content}`).join('\n');
           systemPrompt += `\n\n=== MEMORIAS GUARDADAS ===\n${memText}\n=== FIN ===`;
         }
+        // Si es vendedor, advertir en el system prompt que tiene tools limitadas
+        if (!isAdmin) {
+          systemPrompt += `\n\n=== ROL: VENDEDOR ===\nEl usuario es un vendedor del equipo. Tenés acceso a tools limitadas: consultar propiedades, consultar la lista de vendedores, y manejar tu propia memoria personal. NO tenés acceso a estadísticas gerenciales (embudo, forecast, comisiones, leads de otros), ventas, o datos sensibles. Si te piden algo así, decí "esa info está disponible solo para Leticia (admin)".\n=== FIN ===`;
+        }
+
+        // Filtrar tools según rol
+        const allowedTools = isAdmin
+          ? TOOLS
+          : TOOLS.filter(t => AGENT_ALLOWED_TOOLS.has(t.name));
 
         const history = body.history ?? [];
         const messages: ChatMessage[] = [...history, { role: 'user', content: body.question.trim() }];
@@ -443,7 +467,7 @@ Deno.serve(async (req: Request) => {
         let accumulatedText = '';
         let lastStopReason = 'end_turn';
         for (let i = 0; i < 6; i++) {
-          const { contentBlocks, stopReason } = await streamClaude(messages, systemPrompt, send);
+          const { contentBlocks, stopReason } = await streamClaude(messages, systemPrompt, send, allowedTools);
           lastStopReason = stopReason;
 
           // Sumar texto acumulado de este turn
@@ -458,6 +482,12 @@ Deno.serve(async (req: Request) => {
           const toolResults: Array<{ type: 'tool_result'; tool_use_id: string; content: string }> = [];
           for (const block of contentBlocks) {
             if (block.type !== 'tool_use' || !block.id || !block.name) continue;
+            // Guardia adicional: vendedor solo puede ejecutar tools de su whitelist
+            if (!isAdmin && !AGENT_ALLOWED_TOOLS.has(block.name)) {
+              console.warn(`[assistant] vendor tried to use unauthorized tool: ${block.name}`);
+              toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: JSON.stringify({ error: 'Tool no autorizada para este rol.' }) });
+              continue;
+            }
             try {
               const result = await executeTool(block.name, block.input ?? {});
               toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: JSON.stringify(result) });
@@ -473,7 +503,7 @@ Deno.serve(async (req: Request) => {
         if (!accumulatedText.trim()) {
           console.log('No accumulated text after loop, retrying with explicit text request. lastStopReason:', lastStopReason);
           messages.push({ role: 'user', content: 'Respondeme con texto a mi pregunta original, sin usar más tools. Si no podés hacer lo que te pedí, explicame por qué.' });
-          await streamClaude(messages, systemPrompt, send);
+          await streamClaude(messages, systemPrompt, send, allowedTools);
         }
 
         send('done', { ok: true });
