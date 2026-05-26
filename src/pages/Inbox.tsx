@@ -450,98 +450,108 @@ export default function Inbox() {
 
           {/* Reply input */}
           <div className="border-t border-border p-4 bg-bg-card flex-shrink-0">
-            {/* Banner cuando el contacto IG no está linkeado a ManyChat — el envío
-                desde el CRM va a fallar porque (1) la app no tiene capability
-                instagram_manage_messages aprobada y (2) ManyChat no conoce a este
-                subscriber. Vendedor tiene que responder desde IG nativo. */}
-            {selected.channel === 'instagram' && !selected.manychatSubscriberId && (
-              <div className="mb-3 px-3 py-2 bg-amber-50 border border-amber-300 rounded-lg text-xs text-amber-800 flex items-start gap-2">
-                <span className="flex-shrink-0 mt-0.5">📱</span>
-                <span>
-                  <strong>Respondé desde Instagram nativo.</strong> Este contacto no se puede contactar desde el CRM porque no pasó por un flujo de ManyChat. Una vez que vuelva a escribir, se va a habilitar automáticamente.
-                </span>
-              </div>
-            )}
-
-            {/* Banner cuando el último mensaje INBOUND del cliente es >24h.
-                Regla de Meta WhatsApp: solo se puede enviar libre dentro de
-                ventana 24h. Pasada esa, solo templates. Avisamos al vendor
-                ANTES de que grabe audios o escriba mensajes que van a rebotar. */}
             {(() => {
-              if (selected.channel !== 'whatsapp') return null;
+              // Cálculo único de si el contacto se puede contactar desde el CRM AHORA.
+              // Razones de bloqueo (devuelven canSend=false):
+              //   - WSP/FB: hubo inbound previo pero el último fue hace >24h (Meta cierra
+              //     la ventana de mensajería libre y rebota cualquier texto/audio/foto).
+              //   - IG: sin manychat_subscriber_id (la app no tiene capability y MC no lo
+              //     conoce; el send va a fallar siempre).
+              // NO bloqueamos cuando NO hay inbound (contacto nuevo de form/captación):
+              // el send va a auto-linkear via ManyChat Phone Import y el primer mensaje
+              // suele entrar (depende del estado del subscriber pero al menos no es
+              // determinístico que falle).
+              const has24hRule = selected.channel === 'whatsapp' || selected.channel === 'facebook';
               const lastInbound = selected.messages
                 .filter(m => m.direction === 'in')
                 .reduce<string | null>((latest, m) => !latest || m.timestamp > latest ? m.timestamp : latest, null);
-              if (!lastInbound) return null;
-              const hoursSince = (Date.now() - new Date(lastInbound).getTime()) / 3_600_000;
-              if (hoursSince < 24) return null;
+              const hoursSince = lastInbound ? (Date.now() - new Date(lastInbound).getTime()) / 3_600_000 : 0;
+              const outsideWindow = has24hRule && !!lastInbound && hoursSince >= 24;
+              const igUnlinked = selected.channel === 'instagram' && !selected.manychatSubscriberId;
+              const canSend = !outsideWindow && !igUnlinked;
               const days = Math.floor(hoursSince / 24);
+              const blockReason = outsideWindow
+                ? `Última respuesta hace ${days >= 1 ? `${days}d` : `${Math.floor(hoursSince)}h`}. Mandá desde ${selected.channel === 'whatsapp' ? 'WhatsApp Business app' : 'Messenger app'} si es urgente.`
+                : igUnlinked
+                ? 'Respondé desde Instagram nativo hasta que escriba de nuevo.'
+                : '';
+
               return (
-                <div className="mb-3 px-3 py-2 bg-amber-50 border border-amber-300 rounded-lg text-xs text-amber-800 flex items-start gap-2">
-                  <span className="flex-shrink-0 mt-0.5">⏰</span>
-                  <span>
-                    <strong>Fuera de ventana de 24hs.</strong> El cliente te escribió hace {days >= 1 ? `${days}d` : `${Math.floor(hoursSince)}h`}. WhatsApp NO va a entregar mensajes libres (texto, audio, foto, video) hasta que el cliente te escriba primero. Mandalo desde WhatsApp Business app si es urgente.
-                  </span>
-                </div>
+                <>
+                  {/* Banner unificado de bloqueo */}
+                  {!canSend && (
+                    <div className="mb-3 px-3 py-2 bg-amber-50 border border-amber-300 rounded-lg text-xs text-amber-800 flex items-start gap-2">
+                      <span className="flex-shrink-0 mt-0.5">{outsideWindow ? '⏰' : '📱'}</span>
+                      <span>
+                        <strong>{outsideWindow ? 'Fuera de ventana de 24hs.' : 'Instagram fuera del CRM.'}</strong>{' '}
+                        {outsideWindow
+                          ? `El cliente te escribió hace ${days >= 1 ? `${days}d` : `${Math.floor(hoursSince)}h`}. ${selected.channel === 'whatsapp' ? 'WhatsApp' : 'Facebook Messenger'} no entrega mensajes libres (texto, audio, foto, video) hasta que el cliente vuelva a escribirte.`
+                          : 'Este contacto no se puede contactar desde el CRM porque no pasó por un flujo de ManyChat. Cuando vuelva a escribir se activa automáticamente.'}
+                      </span>
+                    </div>
+                  )}
+                  {sendError && (
+                    <div className="mb-3 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-600 flex items-start gap-2">
+                      <span className="flex-shrink-0 mt-0.5">⚠</span>
+                      <span>{sendError}</span>
+                      <button onClick={() => setSendError(null)} className="ml-auto flex-shrink-0 text-red-400 hover:text-red-600">✕</button>
+                    </div>
+                  )}
+                  {/* Botones de acción: arriba del textarea en mobile, al lado en desktop */}
+                  <div className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-end">
+                    <div className="flex gap-1.5 items-center overflow-x-auto sm:overflow-visible scrollbar-hide flex-shrink-0">
+                      <TemplatePicker
+                        lead={selected}
+                        agent={currentUser}
+                        onPick={rendered => setReply(prev => prev ? `${prev}\n${rendered}` : rendered)}
+                      />
+                      <ReplySuggestions
+                        lead={selected}
+                        agent={currentUser}
+                        onPick={text => setReply(text)}
+                      />
+                      <ClientPortalButton
+                        lead={selected}
+                        agent={currentUser}
+                      />
+                      <AttachMediaButton
+                        contactId={selected.id}
+                        agentId={currentUser.dbId ?? ''}
+                        channel={channelLabel(selected.channel)}
+                        disabled={sending || !canSend}
+                        onSent={() => { void refreshLeads(); }}
+                      />
+                      <RecordVoiceButton
+                        contactId={selected.id}
+                        agentId={currentUser.dbId ?? ''}
+                        channel={channelLabel(selected.channel)}
+                        disabled={sending || !canSend}
+                        onSent={() => { void refreshLeads(); }}
+                      />
+                    </div>
+                    <div className="flex gap-2 items-end flex-1 min-w-0">
+                      <textarea
+                        value={reply}
+                        onChange={e => { setReply(e.target.value); if (sendError) setSendError(null); }}
+                        onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); if (canSend) handleSend(); }}}
+                        placeholder={canSend ? `Responder por ${channelLabel(selected.channel)}...` : 'Envío bloqueado por política del canal'}
+                        rows={2}
+                        disabled={!canSend}
+                        className="flex-1 min-w-0 bg-bg-input border border-border rounded-xl px-4 py-3 text-sm text-white placeholder-muted outline-none focus:border-crimson resize-none disabled:opacity-50 disabled:cursor-not-allowed"
+                      />
+                      <button
+                        onClick={handleSend}
+                        disabled={!reply.trim() || sending || !canSend}
+                        title={!canSend ? blockReason : ''}
+                        className="bg-crimson hover:bg-crimson-light text-white px-4 py-3 rounded-xl text-sm font-medium transition-all disabled:opacity-40 disabled:cursor-not-allowed flex-shrink-0 min-w-[72px]"
+                      >
+                        {sending ? '...' : 'Enviar'}
+                      </button>
+                    </div>
+                  </div>
+                </>
               );
             })()}
-            {sendError && (
-              <div className="mb-3 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-600 flex items-start gap-2">
-                <span className="flex-shrink-0 mt-0.5">⚠</span>
-                <span>{sendError}</span>
-                <button onClick={() => setSendError(null)} className="ml-auto flex-shrink-0 text-red-400 hover:text-red-600">✕</button>
-              </div>
-            )}
-            {/* Botones de acción: arriba del textarea en mobile, al lado en desktop */}
-            <div className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-end">
-              <div className="flex gap-1.5 items-center overflow-x-auto sm:overflow-visible scrollbar-hide flex-shrink-0">
-                <TemplatePicker
-                  lead={selected}
-                  agent={currentUser}
-                  onPick={rendered => setReply(prev => prev ? `${prev}\n${rendered}` : rendered)}
-                />
-                <ReplySuggestions
-                  lead={selected}
-                  agent={currentUser}
-                  onPick={text => setReply(text)}
-                />
-                <ClientPortalButton
-                  lead={selected}
-                  agent={currentUser}
-                />
-                <AttachMediaButton
-                  contactId={selected.id}
-                  agentId={currentUser.dbId ?? ''}
-                  channel={channelLabel(selected.channel)}
-                  disabled={sending}
-                  onSent={() => { void refreshLeads(); }}
-                />
-                <RecordVoiceButton
-                  contactId={selected.id}
-                  agentId={currentUser.dbId ?? ''}
-                  channel={channelLabel(selected.channel)}
-                  disabled={sending}
-                  onSent={() => { void refreshLeads(); }}
-                />
-              </div>
-              <div className="flex gap-2 items-end flex-1 min-w-0">
-                <textarea
-                  value={reply}
-                  onChange={e => { setReply(e.target.value); if (sendError) setSendError(null); }}
-                  onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }}}
-                  placeholder={`Responder por ${channelLabel(selected.channel)}...`}
-                  rows={2}
-                  className="flex-1 min-w-0 bg-bg-input border border-border rounded-xl px-4 py-3 text-sm text-white placeholder-muted outline-none focus:border-crimson resize-none"
-                />
-                <button
-                  onClick={handleSend}
-                  disabled={!reply.trim() || sending}
-                  className="bg-crimson hover:bg-crimson-light text-white px-4 py-3 rounded-xl text-sm font-medium transition-all disabled:opacity-40 flex-shrink-0 min-w-[72px]"
-                >
-                  {sending ? '...' : 'Enviar'}
-                </button>
-              </div>
-            </div>
           </div>
         </div>
       ) : (
