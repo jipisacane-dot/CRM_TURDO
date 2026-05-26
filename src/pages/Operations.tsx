@@ -422,6 +422,10 @@ export default function Operations() {
         // Notas
         notes: draft.notes || null,
         observaciones_extra: draft.observaciones_extra || null,
+        // Default: la operación arranca sin cambio de titularidad. Leti la
+        // marca como hecha desde el detail modal cuando corresponde.
+        titularidad_servicios_done: false,
+        titularidad_servicios_done_at: null,
       });
       // Pasar a step 2 (docs) en vez de cerrar
       setCreatedOpId(newOp.id);
@@ -1343,6 +1347,44 @@ export default function Operations() {
                 <div className="bg-bg-hover rounded-xl p-3">
                   <div className="text-xs text-muted">Fecha escritura</div>
                   <div className="text-[#0F172A] mt-1">{fmtDate(detailOp.fecha_escritura)}</div>
+                </div>
+              )}
+              {/* Cambio de titularidad de servicios (luz/gas). Leti considera que
+                  recién acá la operación está realmente cerrada, post-escritura. */}
+              {(detailOp.status === 'escriturada' || detailOp.titularidad_servicios_done) && (
+                <div className={`rounded-xl p-3 col-span-2 border ${detailOp.titularidad_servicios_done ? 'bg-emerald-50 border-emerald-200' : 'bg-amber-50 border-amber-200'}`}>
+                  <div className="flex items-center justify-between gap-3 flex-wrap">
+                    <div>
+                      <div className={`text-xs uppercase tracking-wider ${detailOp.titularidad_servicios_done ? 'text-emerald-700' : 'text-amber-700'}`}>
+                        Cambio de titularidad (luz / gas)
+                      </div>
+                      <div className={`mt-1 text-sm font-medium ${detailOp.titularidad_servicios_done ? 'text-emerald-900' : 'text-amber-900'}`}>
+                        {detailOp.titularidad_servicios_done
+                          ? `Hecho · ${detailOp.titularidad_servicios_done_at ? fmtDate(detailOp.titularidad_servicios_done_at) : ''}`
+                          : 'Pendiente — operación todavía no cerrada del todo'}
+                      </div>
+                    </div>
+                    {isAdmin && (
+                      <button
+                        onClick={async () => {
+                          const newVal = !detailOp.titularidad_servicios_done;
+                          await operationsApi.update(detailOp.id, {
+                            titularidad_servicios_done: newVal,
+                            titularidad_servicios_done_at: newVal ? new Date().toISOString() : null,
+                          });
+                          await refresh();
+                          // Refrescar el detalle abierto
+                          const updated = ops.find(o => o.id === detailOp.id);
+                          if (updated) setDetailOp({ ...detailOp, titularidad_servicios_done: newVal, titularidad_servicios_done_at: newVal ? new Date().toISOString() : null });
+                        }}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${detailOp.titularidad_servicios_done
+                          ? 'bg-white border border-emerald-300 text-emerald-700 hover:bg-emerald-100'
+                          : 'bg-amber-600 text-white hover:bg-amber-700'}`}
+                      >
+                        {detailOp.titularidad_servicios_done ? 'Desmarcar' : 'Marcar como hecho'}
+                      </button>
+                    )}
+                  </div>
                 </div>
               )}
               {detailOp.cancelled_at && (

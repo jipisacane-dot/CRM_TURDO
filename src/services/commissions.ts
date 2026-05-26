@@ -121,6 +121,10 @@ export interface DBOperation {
   camuzzi: string | null;
   edea: string | null;
   administracion: string | null;
+  // Leti termina la operación cuando hace cambio de titularidad de luz/gas
+  // post-escritura. Hasta ese momento sigue siendo "en curso".
+  titularidad_servicios_done: boolean;
+  titularidad_servicios_done_at: string | null;
   observaciones_extra: string | null;
   created_at: string;
   updated_at: string;
@@ -718,6 +722,15 @@ export const documentsApi = {
     await supabase.storage.from('operation-docs').remove([doc.file_path]);
     const { error } = await supabase.from('operation_documents').delete().eq('id', doc.id);
     if (error) throw error;
+  },
+  async listForProperty(propertyId: string): Promise<DBDocument[]> {
+    const { data, error } = await supabase
+      .from('operation_documents')
+      .select('*')
+      .eq('property_id', propertyId)
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    return data ?? [];
   },
 };
 

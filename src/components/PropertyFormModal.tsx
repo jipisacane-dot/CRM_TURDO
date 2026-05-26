@@ -17,6 +17,8 @@ import type {
   PriceCurrency,
 } from '../services/properties';
 import { Modal } from './ui/Modal';
+import { documentsApi, DOC_CATEGORIES, type DBDocument } from '../services/commissions';
+import { useApp } from '../contexts/AppContext';
 
 interface Props {
   open: boolean;
@@ -40,14 +42,78 @@ const emptyDraft = (): Partial<DBProperty> => ({
 });
 
 export function PropertyFormModal({ open, onClose, property, onSaved }: Props) {
+  const { currentUser } = useApp();
   const [draft, setDraft] = useState<Partial<DBProperty>>(emptyDraft);
   const [photos, setPhotos] = useState<PropertyWithPhotos['photos']>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [section, setSection] = useState<'basico' | 'ubicacion' | 'detalles' | 'amenities' | 'descripcion' | 'fotos' | 'historial'>('basico');
+  const [section, setSection] = useState<'basico' | 'ubicacion' | 'detalles' | 'amenities' | 'descripcion' | 'fotos' | 'documentos' | 'historial'>('basico');
   const [statusHist, setStatusHist] = useState<Array<{ old_status: string | null; new_status: string; changed_at: string; reason: string | null }>>([]);
   const [priceHist, setPriceHist] = useState<Array<{ old_price: number | null; new_price: number; currency: string; changed_at: string; reason: string | null }>>([]);
   const fileRef = useRef<HTMLInputElement>(null);
+  const docFileRef = useRef<HTMLInputElement>(null);
+
+  // ── Documentos (escritura, autorización, etc) ──────────────
+  const [docs, setDocs] = useState<DBDocument[]>([]);
+  const [docCategory, setDocCategory] = useState<string>('escritura');
+  const [docTitle, setDocTitle] = useState<string>('');
+  const [docUploading, setDocUploading] = useState(false);
+
+  const loadDocs = async () => {
+    if (!property) return;
+    try {
+      const list = await documentsApi.listForProperty(property.id);
+      setDocs(list);
+    } catch (e) {
+      console.error('Error cargando documentos de la propiedad:', e);
+    }
+  };
+
+  const handleDocUpload = async (files: FileList | null) => {
+    if (!files || !property) return;
+    setDocUploading(true);
+    try {
+      for (const file of Array.from(files)) {
+        if (file.size > 20 * 1024 * 1024) {
+          alert(`${file.name} supera 20MB, se omitió.`);
+          continue;
+        }
+        await documentsApi.upload({
+          propertyId: property.id,
+          file,
+          category: docCategory,
+          title: docTitle || file.name,
+          uploadedBy: currentUser.dbId ?? null,
+        });
+      }
+      setDocTitle('');
+      await loadDocs();
+    } catch (e) {
+      alert('Error al subir: ' + (e as Error).message);
+    } finally {
+      setDocUploading(false);
+      if (docFileRef.current) docFileRef.current.value = '';
+    }
+  };
+
+  const handleDocOpen = async (doc: DBDocument) => {
+    try {
+      const url = await documentsApi.getPublicUrl(doc.file_path);
+      window.open(url, '_blank');
+    } catch (e) {
+      alert('No se pudo abrir el documento: ' + (e as Error).message);
+    }
+  };
+
+  const handleDocRemove = async (doc: DBDocument) => {
+    if (!confirm(`¿Borrar "${doc.title || doc.file_name}"?`)) return;
+    try {
+      await documentsApi.remove(doc);
+      await loadDocs();
+    } catch (e) {
+      alert('Error al borrar: ' + (e as Error).message);
+    }
+  };
 
   useEffect(() => {
     if (property) {
@@ -65,6 +131,12 @@ export function PropertyFormModal({ open, onClose, property, onSaved }: Props) {
     if (!property || section !== 'historial') return;
     void svc.getStatusHistory(property.id).then(setStatusHist);
     void svc.getPriceHistory(property.id).then(setPriceHist);
+  }, [property, section]);
+
+  useEffect(() => {
+    if (!property || section !== 'documentos') return;
+    void loadDocs();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [property, section]);
 
   const set = <K extends keyof DBProperty>(k: K, v: DBProperty[K] | null) => setDraft(d => ({ ...d, [k]: v }));
@@ -169,7 +241,8 @@ export function PropertyFormModal({ open, onClose, property, onSaved }: Props) {
         <SectionTab id="amenities" label="Amenities" num={4} />
         <SectionTab id="descripcion" label="Descripción" num={5} />
         {property && <SectionTab id="fotos" label={`Fotos (${photos.length})`} num={6} />}
-        {property && <SectionTab id="historial" label="Historial" num={7} />}
+        {property && <SectionTab id="documentos" label={`Documentos${docs.length ? ` (${docs.length})` : ''}`} num={7} />}
+        {property && <SectionTab id="historial" label="Historial" num={8} />}
       </div>
 
       <div className="space-y-4 max-h-[60vh] overflow-y-auto">
@@ -471,6 +544,98 @@ export function PropertyFormModal({ open, onClose, property, onSaved }: Props) {
                     </div>
                   </div>
                 ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── DOCUMENTOS (escritura, autorización, planos, etc) ─── */}
+        {section === 'documentos' && property && (
+          <div className="space-y-3">
+            <p className="text-xs text-muted">
+              Escritura escaneada, autorización de venta, DNI del propietario, planos. Quedan asociados a la propiedad y se pueden ver desde la operación cuando se vende.
+            </p>
+
+            <div className="bg-bg-input rounded-xl p-3 space-y-2 border border-border">
+              <div className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-2 items-end">
+                <div>
+                  <label className="text-[10px] text-muted uppercase tracking-wider">Categoría</label>
+                  <select
+                    value={docCategory}
+                    onChange={(e) => setDocCategory(e.target.value)}
+                    className="w-full bg-white border border-border rounded-lg px-2 py-1.5 text-xs text-[#0F172A]"
+                  >
+                    {DOC_CATEGORIES.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[10px] text-muted uppercase tracking-wider">Título (opcional)</label>
+                  <input
+                    value={docTitle}
+                    onChange={(e) => setDocTitle(e.target.value)}
+                    className="w-full bg-white border border-border rounded-lg px-2 py-1.5 text-xs text-[#0F172A]"
+                    placeholder="Escritura del propietario"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => docFileRef.current?.click()}
+                  disabled={docUploading}
+                  className="px-3 py-1.5 bg-crimson text-white text-xs rounded-lg hover:bg-crimson-bright disabled:opacity-50 whitespace-nowrap"
+                >
+                  {docUploading ? 'Subiendo…' : '+ Subir archivo'}
+                </button>
+                <input
+                  ref={docFileRef}
+                  type="file"
+                  multiple
+                  accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+                  className="hidden"
+                  onChange={(e) => void handleDocUpload(e.target.files)}
+                />
+              </div>
+            </div>
+
+            {docs.length === 0 ? (
+              <div
+                onClick={() => docFileRef.current?.click()}
+                className="border-2 border-dashed border-border rounded-2xl p-10 text-center cursor-pointer hover:border-crimson transition-all"
+              >
+                <div className="text-3xl mb-2">📄</div>
+                <p className="text-muted text-sm">Subí escrituras, planos, autorizaciones — PDF / imagen / Word</p>
+              </div>
+            ) : (
+              <div className="space-y-1.5">
+                {docs.map(d => {
+                  const cat = DOC_CATEGORIES.find(c => c.key === d.category);
+                  return (
+                    <div key={d.id} className="flex items-center gap-2 bg-bg-input border border-border rounded-lg px-3 py-2">
+                      <span className="text-lg">📎</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm text-[#0F172A] truncate font-medium">
+                          {d.title || d.file_name}
+                        </div>
+                        <div className="text-[11px] text-muted">
+                          {cat?.label ?? d.category} · {d.file_name} · {new Date(d.created_at).toLocaleDateString('es-AR')}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => void handleDocOpen(d)}
+                        className="px-2 py-1 text-xs text-crimson hover:bg-crimson/10 rounded"
+                      >
+                        Ver
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void handleDocRemove(d)}
+                        className="px-2 py-1 text-xs text-red-600 hover:bg-red-50 rounded"
+                      >
+                        Borrar
+                      </button>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
