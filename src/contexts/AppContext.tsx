@@ -59,6 +59,7 @@ interface SendResult {
   outside_window?: boolean;
   auth_error?: boolean;       // token expirado/inválido (Meta code 190)
   permission_error?: boolean; // falta permission scope (Meta code 200)
+  no_phone?: boolean;         // contacto sin teléfono ni subscriber
   error?: string;
 }
 
@@ -533,7 +534,12 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       // Parse Meta error code from the error string to categorize failure mode
       let auth_error = false;
       let permission_error = false;
+      let no_phone = false;
       const errStr = String(delivery.error ?? '');
+      // Errores específicos de send-message para contactos sin path de envío
+      if (errStr.includes('no_phone_no_subscriber') || errStr.includes('no_send_path_available')) {
+        no_phone = true;
+      }
       // Prioridad: si hay code explícito, decide solo por código.
       // Sino, fallback a regex de heurística (texto del error).
       const codeMatch = errStr.match(/"code"\s*:\s*(\d+)/);
@@ -553,6 +559,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
         outside_window: delivery.outside_window,
         auth_error,
         permission_error,
+        no_phone,
         error: delivery.error,
       };
     }

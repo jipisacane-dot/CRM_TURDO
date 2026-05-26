@@ -61,11 +61,10 @@ export default function AttachMediaButton({ contactId, agentId, channel, onSent,
       alert(`Archivo muy grande (${(file.size / 1024 / 1024).toFixed(1)} MB). Máximo 50 MB.`);
       return;
     }
-    // Bloqueo temporal: video y audio no se pueden enviar al WhatsApp del cliente todavía.
-    if (file.type.startsWith('video/') || file.type.startsWith('audio/')) {
-      alert(`El envío de ${file.type.startsWith('video/') ? 'videos' : 'audios'} desde el CRM está temporalmente deshabilitado.\n\nMandalo desde WhatsApp Web del número de Turdo (+54 9 223 525-2984) en otra pestaña. La respuesta del cliente sí va a llegar al CRM.`);
-      return;
-    }
+    // Nota: video/audio ahora funcionan vía ManyChat sendContent una vez que
+    // el contacto tiene manychat_subscriber_id (se crea automático en el
+    // primer envío vía findOrCreateMCSubscriberForWA). Si el envío llega a
+    // fallar, send-message devuelve error y el caller (Inbox) lo muestra.
     setShowMenu(false);
     let processed = file;
     if (file.type.startsWith('image/')) {

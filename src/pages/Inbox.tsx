@@ -179,13 +179,15 @@ export default function Inbox() {
     if (!result.ok) {
       if (result.auth_error) {
         setSendError('⚠ Token de Meta vencido. Avisale al admin para renovar el token.');
+      } else if (result.no_phone) {
+        setSendError('Este contacto no tiene teléfono cargado. Editalo en el header del chat (click sobre "Sin teléfono") y cargá el número.');
       } else if (result.permission_error || result.outside_window) {
         // Tanto code 200 de Meta como "outside window" de ManyChat representan el
         // mismo problema estructural: no podemos enviar a este contacto desde el
         // CRM hasta que ManyChat registre una "interacción" real (click en botón
         // o quick reply de un flujo). Por ahora, solo se puede responder desde
         // la app de WhatsApp Business directamente.
-        setSendError('No se puede responder a este contacto desde el CRM. Respondele desde WhatsApp Business directamente (Estamos trabajando en arreglar esto).');
+        setSendError('No se puede responder a este contacto desde el CRM. Respondele desde WhatsApp Business directamente.');
       } else {
         setSendError('No se pudo enviar el mensaje. Revisá que el contacto esté activo en el canal.');
       }

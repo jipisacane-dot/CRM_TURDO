@@ -97,8 +97,6 @@ export default function RecordVoiceButton({ contactId, agentId, channel, onSent,
     }
   };
 
-  // @ts-expect-error temporalmente unused (botón deshabilitado por limitación ManyChat/Meta)
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const stopRecording = () => {
     if (timerRef.current) { window.clearInterval(timerRef.current); timerRef.current = null; }
     recorderRef.current?.stop();
@@ -167,17 +165,27 @@ export default function RecordVoiceButton({ contactId, agentId, channel, onSent,
 
   return (
     <>
-      <button
-        type="button"
-        onClick={() => {
-          alert('El envío de audio desde el CRM está temporalmente deshabilitado.\n\nPara mandar audios al cliente, abrí WhatsApp Web del número de Turdo (+54 9 223 525-2984) en otra pestaña. La respuesta del cliente sí va a llegar al CRM.');
-        }}
-        disabled={disabled}
-        title="Audio temporalmente deshabilitado — usar WhatsApp Web del número Turdo"
-        className="px-3 py-3 rounded-xl text-sm transition-colors flex-shrink-0 border bg-bg-input border-border text-muted opacity-50 cursor-not-allowed"
-      >
-        🎤
-      </button>
+      {state === 'idle' && (
+        <button
+          type="button"
+          onClick={() => void startRecording()}
+          disabled={disabled}
+          title="Grabar nota de voz"
+          className="bg-bg-input border border-border hover:border-crimson text-muted hover:text-white px-3 py-3 rounded-xl text-sm transition-colors flex-shrink-0 disabled:opacity-40"
+        >
+          🎤
+        </button>
+      )}
+      {state === 'recording' && (
+        <button
+          type="button"
+          onClick={stopRecording}
+          title="Parar grabación"
+          className="bg-red-600 text-white px-3 py-3 rounded-xl text-sm transition-colors flex-shrink-0 animate-pulse"
+        >
+          ⏹ {fmtTime(seconds)}
+        </button>
+      )}
 
       {permError && (
         <div className="absolute bottom-full mb-2 right-0 bg-red-50 border border-red-200 text-red-700 text-xs px-3 py-2 rounded-lg max-w-xs z-50">

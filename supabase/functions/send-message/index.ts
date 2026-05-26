@@ -319,6 +319,66 @@ async function getMCSubscriber(mcId: string): Promise<{ ig_id?: string; whatsapp
   } catch { return null; }
 }
 
+// ── ManyChat subscriber: find existing or create new ─────────────────────────
+// Cuando un vendedor manda mensaje y el contacto NO tiene manychat_subscriber_id,
+// intentamos linkearlo en el momento. Si no lo encontramos por nombre, lo creamos
+// vía Phone Import API. Sin esto los envíos a contactos viejos (los 462 sin
+// linkear) fallarían siempre.
+async function findOrCreateMCSubscriberForWA(phone: string, name: string): Promise<string | null> {
+  if (!MANYCHAT_KEY || !phone) return null;
+  const normalizedPhone = phone.startsWith('+') ? phone : `+${phone.replace(/\D/g, '')}`;
+
+  // 1. Buscar por nombre + match por phone (rápido si ya existe en ManyChat)
+  if (name && name !== 'Sin nombre' && !/^\+?\d+$/.test(name)) {
+    try {
+      const r = await fetch(
+        `https://api.manychat.com/fb/subscriber/findByName?name=${encodeURIComponent(name)}`,
+        { headers: { Authorization: `Bearer ${MANYCHAT_KEY}` } }
+      );
+      if (r.ok) {
+        const j = await r.json();
+        const match = (j.data ?? []).find((s: Record<string, unknown>) => s.whatsapp_phone === normalizedPhone);
+        if (match?.id) return String(match.id);
+      }
+    } catch (e) {
+      console.warn('[send-message] findByName err:', e);
+    }
+  }
+
+  // 2. Crear con Phone Import API
+  const parts = (name || '').trim().split(/\s+/);
+  const firstName = parts[0] && parts[0] !== 'Sin' ? parts[0] : 'Contacto';
+  const lastName = parts.length > 1 && parts[0] !== 'Sin' ? parts.slice(1).join(' ') : '-';
+  try {
+    const r = await fetch('https://api.manychat.com/fb/subscriber/createSubscriber', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${MANYCHAT_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        whatsapp_phone: normalizedPhone,
+        first_name: firstName,
+        last_name: lastName,
+        has_opt_in_sms: false,
+        has_opt_in_email: false,
+        consent_phrase: 'Contact opted in by sending WhatsApp message to business.',
+      }),
+    });
+    const raw = await r.text();
+    let j: Record<string, unknown>;
+    try { j = JSON.parse(raw); } catch { return null; }
+    if (r.ok && j.status === 'success') {
+      const id = (j.data as Record<string, unknown> | undefined)?.id;
+      if (id) {
+        console.log(`[send-message] createSubscriber OK ${normalizedPhone} → ${id}`);
+        return String(id);
+      }
+    }
+    console.log(`[send-message] createSubscriber failed for ${normalizedPhone}: ${raw.slice(0, 200)}`);
+  } catch (e) {
+    console.warn('[send-message] createSubscriber err:', e);
+  }
+  return null;
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 Deno.serve(async (req) => {
   const cors = buildCors(req);
@@ -382,82 +442,58 @@ Deno.serve(async (req) => {
       if (phone) await supabase.from('contacts').update({ phone }).eq('id', contact_id);
     }
 
-    // WhatsApp routing:
-    // 1) Si hay manychat_subscriber_id → sendContent (soporta media nativa)
-    // 2) Si no hay subscriber pero hay channel_id → sendFlow (texto solo, comportamiento actual)
-    // 3) Fallback → Cloud API (solo funciona si eventualmente se destraba)
+    // WhatsApp routing (estable post 25/05):
+    // 1) Si NO hay manychat_subscriber_id Y hay phone → crear subscriber AHORA
+    //    (vía findOrCreateMCSubscriberForWA). Esto destraba contactos viejos
+    //    sin linkear y nuevos donde el webhook todavía no procesó.
+    // 2) Con subscriber → sendContent (soporta texto + media nativa)
+    // 3) Sin subscriber Y sin phone (caso extremo, ej contacto manual sin tel)
+    //    → fallar claramente para que vendor edite el contacto
     let mcSubscriberId = (contact.manychat_subscriber_id as string | null) ?? null;
 
-    // Defensa: si no tenemos subscriber_id pero el contacto tiene nombre y phone,
-    // buscar en ManyChat AHORA (puede pasar si el webhook auto-lookup falló por
-    // race con ManyChat al crear el subscriber).
-    if (!mcSubscriberId && contact.name && phone && MANYCHAT_KEY) {
-      const name = contact.name as string;
-      if (name !== 'Sin nombre' && !/^\+?\d+$/.test(name)) {
-        try {
-          const r = await fetch(
-            `https://api.manychat.com/fb/subscriber/findByName?name=${encodeURIComponent(name)}`,
-            { headers: { Authorization: `Bearer ${MANYCHAT_KEY}` } }
-          );
-          if (r.ok) {
-            const j = await r.json();
-            const normPhone = phone.startsWith('+') ? phone : `+${phone.replace(/\D/g, '')}`;
-            const match = (j.data ?? []).find((s: Record<string, unknown>) => s.whatsapp_phone === normPhone);
-            if (match?.id) {
-              mcSubscriberId = String(match.id);
-              await supabase.from('contacts').update({ manychat_subscriber_id: mcSubscriberId }).eq('id', contact_id);
-              console.log(`[send-message] auto-linked contact ${contact_id} → MC ${mcSubscriberId}`);
-            }
-          }
-        } catch (e) {
-          console.warn('[send-message] MC lookup err:', e);
-        }
+    if (!mcSubscriberId && phone && MANYCHAT_KEY) {
+      const name = (contact.name as string) ?? '';
+      const found = await findOrCreateMCSubscriberForWA(phone, name);
+      if (found) {
+        mcSubscriberId = found;
+        await supabase.from('contacts').update({ manychat_subscriber_id: mcSubscriberId }).eq('id', contact_id);
+        console.log(`[send-message] auto-linked contact ${contact_id} → MC ${mcSubscriberId}`);
       }
     }
+
     const mcMedia = waMedia ? { url: waMedia.url, type: waMedia.type, caption: waMedia.caption } : undefined;
 
     if (mcSubscriberId) {
-      // Camino nuevo: sendContent (media + texto nativo)
+      // Camino principal: sendContent (texto + media nativa por igual)
       const r = await sendManyChatContentWA(mcSubscriberId, content, mcMedia);
       if (r.ok) { method = 'manychat_content'; ok = true; }
       else {
         errDetail = `mc_content: ${r.error}`;
         outsideWindow = r.outsideWindow ?? false;
-        // Fallback al método viejo de Flow si es texto solo.
-        // CRÍTICO: usar mcSubscriberId (el ID real de Manychat), NO channel_id
-        // (que es el wa_id de WhatsApp y no matchea con Manychat).
+        // Fallback a sendFlow solo para texto (fuera-de-ventana edge case)
         if (!waMedia) {
           const r2 = await sendManyChatWA(mcSubscriberId, content, undefined);
           if (r2.ok) { method = 'manychat_flow'; ok = true; outsideWindow = false; }
           else { errDetail += ` | mc_flow: ${r2.error}`; }
         }
       }
-    } else if (waMedia && (waMedia.type === 'audio' || waMedia.type === 'video')) {
-      // Sin subscriber ManyChat + audio/video → bloqueado (mismo workaround actual)
+    } else if (!phone) {
+      // Contacto sin phone Y sin subscriber → no podemos enviar
       method = 'failed';
-      errDetail = 'audio_video_temporarily_disabled';
+      errDetail = 'no_phone_no_subscriber';
       outsideWindow = false;
-    } else if (contact.channel_id) {
-      // Sin subscriber pero con channel_id (legacy) → sendFlow (texto + image/file via flows)
-      const r = await sendManyChatWA(contact.channel_id, content, mcMedia);
-      if (r.ok) { method = 'manychat'; ok = true; }
-      else {
-        errDetail = `mc: ${r.error}`;
-        if (phone && WA_PHONE_NUMBER_ID) {
-          const r2 = await sendWhatsApp(phone, content, waMedia);
-          if (r2.ok) { method = 'whatsapp_cloud'; ok = true; }
-          else {
-            outsideWindow = r.outsideWindow ?? false;
-            errDetail += ` | wa: ${r2.error}`;
-          }
-        } else {
-          outsideWindow = r.outsideWindow ?? false;
-        }
+    } else {
+      // Subscriber no se pudo crear (Phone Import quizás deshabilitado o ML rate limit)
+      // Como último recurso, Cloud API directo (en SMB tier devuelve #200,
+      // pero lo intentamos para que el vendedor sepa el error real).
+      if (WA_PHONE_NUMBER_ID) {
+        const r = await sendWhatsApp(phone, content, waMedia);
+        if (r.ok) { method = 'whatsapp_cloud'; ok = true; }
+        else { outsideWindow = r.outsideWindow ?? false; errDetail = `wa_cloud_fallback: ${r.error ?? ''}`; }
+      } else {
+        method = 'failed';
+        errDetail = 'no_send_path_available';
       }
-    } else if (phone && WA_PHONE_NUMBER_ID) {
-      const r = await sendWhatsApp(phone, content, waMedia);
-      if (r.ok) { method = 'whatsapp_cloud'; ok = true; }
-      else { outsideWindow = r.outsideWindow ?? false; errDetail = r.error ?? ''; }
     }
 
   // ── Instagram ───────────────────────────────────────────────────────────────
