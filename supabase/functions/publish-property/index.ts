@@ -5,6 +5,7 @@
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { requireAuth } from '../_shared/auth.ts';
+import { publishToML, updateMLItem, unpublishMLItem, type PropertyForML } from '../_shared/mercadolibre.ts';
 
 const supabase = createClient(
   Deno.env.get('SUPABASE_URL')!,
@@ -42,12 +43,13 @@ Deno.serve(async (req) => {
   if (!CORS) return new Response('Forbidden origin', { status: 403 });
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
   if (req.method !== 'POST') {
-
-  // Auth check: bloquear invocaciones anonimas (Claude API caro / abuso)
-  const authError = await requireAuth(req, CORS);
-  if (authError) return authError;
     return new Response(JSON.stringify({ error: 'POST only' }), { status: 405, headers: { ...CORS, 'Content-Type': 'application/json' } });
   }
+
+  // Auth check: bloquear invocaciones anónimas. ANTES estaba mal ubicado
+  // dentro del if !== POST, así que en la práctica nunca se ejecutaba.
+  const authError = await requireAuth(req, CORS);
+  if (authError) return authError;
 
   let body: PublishRequest;
   try {
@@ -69,9 +71,35 @@ Deno.serve(async (req) => {
   // ── Despublicar ──────────────────────────────────────
   if (body.publish === false) {
     await supabase.from('properties').update({ is_published: false }).eq('id', body.property_id);
-    // TODO fin de mes: llamar a ML.delete + web.unpublish
-    console.log('[publish-property] STUB unpublish ML:', prop.ml_item_id ?? '(no ml_item_id)');
-    return json({ ok: true, action: 'unpublished' });
+
+    const unpublishResults: Record<string, string> = {};
+
+    // ML: pausar el item (no borrar — para mantener historial / poder reactivar)
+    if (prop.ml_item_id) {
+      const r = await unpublishMLItem(prop.ml_item_id, 'paused');
+      unpublishResults.mercadolibre = r.ok ? 'pausado' : `error: ${r.error}`;
+    } else {
+      unpublishResults.mercadolibre = 'sin ml_item_id (no se publicó nunca)';
+    }
+
+    // Web: notificar webhook de despublicación
+    const webHookUrl = Deno.env.get('TURDO_WEB_WEBHOOK_URL');
+    if (webHookUrl && prop.slug) {
+      try {
+        await fetch(webHookUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ event: 'property.unpublished', slug: prop.slug, property_id: prop.id }),
+        });
+        unpublishResults.web = 'webhook enviado';
+      } catch (e) {
+        unpublishResults.web = `error: ${(e as Error).message}`;
+      }
+    } else {
+      unpublishResults.web = 'sin webhook configurado';
+    }
+
+    return json({ ok: true, action: 'unpublished', sync: unpublishResults });
   }
 
   // ── Validaciones para publicar ────────────────────────
@@ -103,39 +131,111 @@ Deno.serve(async (req) => {
     .eq('id', body.property_id);
   if (upErr) return json({ error: upErr.message }, 500);
 
-  // ── STUBS: ML + Web + ZP ─────────────────────────────
-  // Estos placeholders se reemplazan con llamadas reales cuando los integradores estén:
-  // - ML: requiere OAuth + POST a /items (cuenta activa fin de mes)
-  // - Web: la web del desarrollador va a leer de v_published_properties directamente,
-  //        o le mandamos un webhook con el slug.
-  // - ZP: por ahora se sigue cargando manualmente desde Tokko hasta firmar partner.
+  // ── Sync con plataformas externas ─────────────────────
   const syncResults: Record<string, string> = {};
 
-  // ML stub
-  if (Deno.env.get('ML_ACCESS_TOKEN')) {
-    syncResults.mercadolibre = 'TODO: implementar POST /items';
+  // ── Mercado Libre ────────────────────────────────────
+  // Activa solo si ML_CLIENT_ID/SECRET/REFRESH_TOKEN están en Supabase secrets.
+  // Si ya tenía ml_item_id, actualiza. Si no, crea uno nuevo y guarda el ID.
+  if (Deno.env.get('ML_CLIENT_ID') && Deno.env.get('ML_REFRESH_TOKEN')) {
+    // Obtener URLs públicas de las fotos para mandarle a ML
+    const { data: photos } = await supabase
+      .from('property_photos')
+      .select('url')
+      .eq('property_id', body.property_id)
+      .order('order_index');
+    const pictures = (photos ?? []).map(p => p.url as string).filter(Boolean);
+
+    const propForML: PropertyForML = {
+      id: prop.id,
+      internal_code: prop.internal_code,
+      address: prop.address,
+      street: prop.street,
+      street_number: prop.street_number,
+      barrio: prop.barrio,
+      city: prop.city,
+      province: prop.province,
+      description: prop.description,
+      rooms: prop.rooms,
+      bedrooms: prop.bedrooms,
+      bathrooms: prop.bathrooms,
+      garage: prop.garage,
+      surface_m2: prop.surface_m2,
+      surface_total_m2: prop.surface_total_m2,
+      list_price_usd: prop.list_price_usd,
+      price_currency: prop.price_currency,
+      operation_type: prop.operation_type,
+      property_type: prop.property_type,
+      condition: prop.condition,
+      latitude: prop.latitude,
+      longitude: prop.longitude,
+      ml_item_id: prop.ml_item_id,
+    };
+
+    if (prop.ml_item_id) {
+      // Update existente
+      const r = await updateMLItem(prop.ml_item_id, propForML, pictures);
+      syncResults.mercadolibre = r.ok ? `actualizado (${prop.ml_item_id})` : `error: ${r.error}`;
+    } else {
+      // Create nuevo
+      const r = await publishToML(propForML, pictures);
+      if (r.ok) {
+        await supabase.from('properties').update({ ml_item_id: r.item_id }).eq('id', body.property_id);
+        syncResults.mercadolibre = `publicado: ${r.permalink}`;
+      } else {
+        syncResults.mercadolibre = `error: ${r.error}`;
+      }
+    }
   } else {
-    syncResults.mercadolibre = 'pendiente: cuenta ML aún no activa';
+    syncResults.mercadolibre = 'desactivado: faltan ML_CLIENT_ID/ML_CLIENT_SECRET/ML_REFRESH_TOKEN en Supabase secrets';
   }
 
-  // Web stub
+  // ── Web propia (turdopropiedades.com) ───────────────
   const webHookUrl = Deno.env.get('TURDO_WEB_WEBHOOK_URL');
   if (webHookUrl) {
     try {
-      await fetch(webHookUrl, {
+      const webResp = await fetch(webHookUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ event: 'property.published', slug: prop.slug, property_id: prop.id }),
+        headers: {
+          'Content-Type': 'application/json',
+          // Optional: secret compartido para que la web valide el origen
+          ...(Deno.env.get('TURDO_WEB_WEBHOOK_SECRET') ? { 'X-Webhook-Secret': Deno.env.get('TURDO_WEB_WEBHOOK_SECRET')! } : {}),
+        },
+        body: JSON.stringify({
+          event: 'property.published',
+          property_id: prop.id,
+          slug: prop.slug,
+          internal_code: prop.internal_code,
+          // Payload completo para que la web pueda renderizar sin hacer query extra
+          property: {
+            title: prop.address ?? prop.internal_code,
+            price: prop.list_price_usd,
+            currency: prop.price_currency,
+            operation: prop.operation_type,
+            type: prop.property_type,
+            address: prop.address,
+            barrio: prop.barrio,
+            city: prop.city,
+            province: prop.province,
+            rooms: prop.rooms,
+            bedrooms: prop.bedrooms,
+            bathrooms: prop.bathrooms,
+            surface_m2: prop.surface_m2,
+            description: prop.description,
+            cover_photo: prop.cover_photo_url,
+            public_url: `https://crm-turdo.vercel.app/p/${prop.slug}`,
+          },
+        }),
       });
-      syncResults.web = 'webhook enviado';
-    } catch {
-      syncResults.web = 'error enviando webhook';
+      syncResults.web = webResp.ok ? 'webhook enviado' : `error HTTP ${webResp.status}`;
+    } catch (e) {
+      syncResults.web = `error: ${(e as Error).message}`;
     }
   } else {
-    syncResults.web = 'pendiente: webhook de la web aún no configurado';
+    syncResults.web = 'desactivado: falta TURDO_WEB_WEBHOOK_URL en Supabase secrets';
   }
 
-  // ZP stub
+  // ── ZP ───────────────────────────────────────────────
   syncResults.zonaprop = 'manual: cargar desde Tokko (hasta firmar partner)';
 
   return json({
