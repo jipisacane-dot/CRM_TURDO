@@ -14,9 +14,12 @@
 //   - Cron: pg_cron job cada 30min llama a esta fn vía pg_net.
 //
 // Categorización (matching memoria de Lety, 2026-05-13):
-//   - vendedores → channel 'facebook' + status 'new' + branch default
-//   - compradores_general → channel 'facebook' + branch default
-//   - project_specific → channel 'facebook' + property_title = project_name + branch default
+//   - vendedores / compradores_general / project_specific → mismo flujo
+//
+// Routing de canal (fix 2026-05-26 después de descubrir bug "No entregado" en FB DM):
+//   - phone normalizado tiene 10+ dígitos → channel 'whatsapp' (Tomás/Gianluca pueden mandarle directo)
+//   - sin phone válido → channel 'facebook' (fallback; pero FB DM fallará si no abrió conversación con la página,
+//     limitación real de Meta — vendedor tendrá que usar email)
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
@@ -148,12 +151,18 @@ async function syncForm(form: FormConfig): Promise<{ inserted: number; skipped: 
         f.extras,
       ].filter(Boolean).join('\n');
 
+      // Canal según los datos del lead: si trajo teléfono válido (10+ dígitos) lo
+      // ruteamos por WhatsApp (única forma confiable de contactar leads del form,
+      // porque FB Messenger DM requiere conversación previa con la página).
+      const validPhone = phoneNorm.length >= 10;
+      const contactChannel: 'whatsapp' | 'facebook' = validPhone ? 'whatsapp' : 'facebook';
+
       // Insertar contact y obtener el id para el message sintético
       const { data: inserted_contact, error } = await sb.from('contacts').insert({
         name: f.name,
         phone: f.phone || null,
         email: emailNorm || null,
-        channel: 'facebook',
+        channel: contactChannel,
         channel_id: `meta_lead_${lead.id}`,
         status: 'new',
         current_stage_key: 'nuevo',
@@ -179,7 +188,7 @@ async function syncForm(form: FormConfig): Promise<{ inserted: number; skipped: 
           contact_id: inserted_contact.id,
           direction: 'in',
           content: notesBlock,
-          channel: 'facebook',
+          channel: contactChannel,
           read: false,
           created_at: lead.created_time,
         });
