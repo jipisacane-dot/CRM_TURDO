@@ -219,6 +219,87 @@ export default function Finanzas() {
     await refresh();
   };
 
+  // Genera PDF imprimible con el detalle de gastos del mes para que Leti
+  // marque a mano qué pagó (item de la reunión 23/05).
+  const handleDownloadPDF = async () => {
+    const jsPDFModule = await import('jspdf');
+    const autoTableModule = await import('jspdf-autotable');
+    const jsPDF = jsPDFModule.default;
+    const autoTable = autoTableModule.default;
+    const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' });
+    const monthName = monthLabel(yearMonth);
+
+    doc.setFontSize(16).setFont('helvetica', 'bold');
+    doc.text('Gastos del negocio', 40, 50);
+    doc.setFontSize(11).setFont('helvetica', 'normal');
+    doc.text(`Mes: ${monthName}`, 40, 70);
+    doc.text(`Generado: ${new Date().toLocaleString('es-AR')}`, 40, 85);
+
+    // Tabla por categoría agrupada
+    const byCat = new Map<string, { items: typeof expenses; totalArs: number; totalUsd: number }>();
+    for (const e of expenses) {
+      const cat = e.category;
+      const entry = byCat.get(cat) ?? { items: [], totalArs: 0, totalUsd: 0 };
+      entry.items.push(e);
+      entry.totalArs += Number(e.amount_ars);
+      if (e.currency === 'USD' && e.amount_usd != null) entry.totalUsd += Number(e.amount_usd);
+      byCat.set(cat, entry);
+    }
+
+    const rows: Array<[string, string, string, string, string]> = [];
+    for (const [cat, info] of Array.from(byCat.entries()).sort((a, b) => b[1].totalArs - a[1].totalArs)) {
+      const catLabel = EXPENSE_CATEGORIES.find(c => c.key === cat)?.label ?? cat;
+      // Header de categoría
+      rows.push([`▸ ${catLabel}`, '', '', '', `Subtotal: ${fmtARS(info.totalArs)}${info.totalUsd > 0 ? ` (${info.totalUsd.toLocaleString('es-AR')} USD)` : ''}`]);
+      // Items dentro
+      for (const e of info.items.sort((a, b) => a.fecha.localeCompare(b.fecha))) {
+        rows.push([
+          '☐',
+          fmtDate(e.fecha),
+          e.description,
+          e.paid_to ?? '—',
+          e.currency === 'USD' && e.amount_usd != null
+            ? `USD ${Number(e.amount_usd).toLocaleString('es-AR')}`
+            : fmtARS(Number(e.amount_ars)),
+        ]);
+      }
+    }
+
+    if (rows.length === 0) {
+      doc.text('Sin gastos cargados en este mes.', 40, 120);
+    } else {
+      autoTable(doc, {
+        startY: 105,
+        head: [['', 'Fecha', 'Descripción', 'Pagado a', 'Monto']],
+        body: rows,
+        styles: { fontSize: 9, cellPadding: 4 },
+        headStyles: { fillColor: [220, 38, 38], textColor: 255 },
+        columnStyles: {
+          0: { cellWidth: 25, halign: 'center' },
+          1: { cellWidth: 65 },
+          2: { cellWidth: 'auto' },
+          3: { cellWidth: 110 },
+          4: { cellWidth: 100, halign: 'right' },
+        },
+        didParseCell: (data) => {
+          // Filas de header de categoría: bold + gris
+          if (data.row.raw && (data.row.raw as string[])[0]?.startsWith('▸')) {
+            data.cell.styles.fontStyle = 'bold';
+            data.cell.styles.fillColor = [243, 244, 246];
+            data.cell.styles.textColor = [17, 24, 39];
+          }
+        },
+      });
+    }
+
+    // Total al pie
+    const finalY = (doc as unknown as { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ?? 130;
+    doc.setFontSize(12).setFont('helvetica', 'bold');
+    doc.text(`Total del mes: ${fmtARS(monthExpensesTotal)}`, 40, finalY + 30);
+
+    doc.save(`gastos_${yearMonth}.pdf`);
+  };
+
   if (!isAdmin) {
     return (
       <div className="p-5 md:p-8">
@@ -236,7 +317,15 @@ export default function Finanzas() {
           <h1 className="text-2xl font-bold text-[#0F172A]">Finanzas</h1>
           <p className="text-muted text-sm mt-0.5 capitalize">{monthLabel(yearMonth)}</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
+          <button
+            onClick={() => void handleDownloadPDF()}
+            disabled={expenses.length === 0}
+            className="px-4 py-2.5 inline-flex items-center gap-2 bg-white border border-border text-[#0F172A] hover:bg-bg-hover rounded-xl text-sm font-medium transition-all disabled:opacity-40"
+            title="Descargá el detalle del mes en PDF para imprimir y tachar lo pagado"
+          >
+            📄 PDF del mes
+          </button>
           <button
             onClick={() => void sendMonthlySummary()}
             disabled={sendingSummary}
