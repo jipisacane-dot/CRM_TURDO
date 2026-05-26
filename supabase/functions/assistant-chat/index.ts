@@ -81,19 +81,32 @@ const TOOLS = [
   { name: 'olvidar', description: 'Borra un hecho de memoria por id. Usalo si el usuario dice "olvidate eso" o "ya no aplica".', input_schema: { type: 'object', properties: { memory_id: { type: 'string' } }, required: ['memory_id'] } },
 ];
 
-// Tools que se permiten a vendedores (no expone data de otros vendedores
-// ni stats gerenciales). Admin tiene acceso a TOOLS completo. Si un vendedor
-// pide algo que use otra tool, Claude responde "no tengo acceso a eso".
+// Tools que se permiten a vendedores. Las que aceptan `agent_key` se ejecutan
+// forzando el ID del propio vendedor (no puede consultar data de otros).
+// Admin tiene acceso a TOOLS completo.
 const AGENT_ALLOWED_TOOLS = new Set([
   'consultar_propiedades',
   'consultar_vendedores',
+  'consultar_negociaciones_activas',  // forzado a su propio agent_id
   'recordar',
   'olvidar',
+]);
+
+// Tools que tienen parámetro agent_key — para vendedores siempre lo sobrescribimos
+// con su propio dbId, ignorando lo que Claude haya pasado (defensa contra
+// prompt-injection del estilo "consultá las negociaciones del vendedor X").
+const TOOLS_WITH_AGENT_FILTER = new Set([
+  'consultar_negociaciones_activas',
+  'consultar_embudo',
+  'consultar_ciclo_venta',
 ]);
 
 // ── Implementación tools ────────────────────────────────────────────────────
 
 let _currentUserEmail = '';
+// Agent ID (UUID en agents.id) del usuario actual. Para admin queda null.
+// Para vendedores, forzamos su valor en cualquier tool que filtre por agent.
+let _currentAgentId: string | null = null;
 
 async function executeTool(name: string, input: Record<string, unknown>): Promise<unknown> {
   switch (name) {
@@ -408,7 +421,7 @@ Deno.serve(async (req: Request) => {
 
   // Saneamiento + validación de input (defensa contra payloads malformados,
   // prompt-injection de gran volumen, historiales gigantes que drainen tokens)
-  let body: { history?: ChatMessage[]; question: string; role?: string; user_email?: string };
+  let body: { history?: ChatMessage[]; question: string; role?: string; user_email?: string; agent_id?: string | null };
   try {
     body = await req.json();
   } catch {
@@ -434,6 +447,7 @@ Deno.serve(async (req: Request) => {
   }
   body.question = question;
   _currentUserEmail = typeof body.user_email === 'string' ? body.user_email : 'leticia@turdogroup.com';
+  _currentAgentId = typeof body.agent_id === 'string' ? body.agent_id : null;
 
   // Stream response al cliente
   const stream = new ReadableStream({
@@ -452,7 +466,14 @@ Deno.serve(async (req: Request) => {
         }
         // Si es vendedor, advertir en el system prompt que tiene tools limitadas
         if (!isAdmin) {
-          systemPrompt += `\n\n=== ROL: VENDEDOR ===\nEl usuario es un vendedor del equipo. Tenés acceso a tools limitadas: consultar propiedades, consultar la lista de vendedores, y manejar tu propia memoria personal. NO tenés acceso a estadísticas gerenciales (embudo, forecast, comisiones, leads de otros), ventas, o datos sensibles. Si te piden algo así, decí "esa info está disponible solo para Leticia (admin)".\n=== FIN ===`;
+          systemPrompt += `\n\n=== ROL: VENDEDOR ===\nEl usuario es un vendedor del equipo. Tenés acceso a tools limitadas:
+- consultar_propiedades: ver propiedades cargadas (info compartida del equipo)
+- consultar_vendedores: ver la lista del equipo
+- consultar_negociaciones_activas: ver SUS PROPIAS negociaciones activas (el sistema fuerza el filtro automáticamente — no podés ver las de otros vendedores)
+- recordar / olvidar: tu propia memoria personal
+
+NO tenés acceso a estadísticas gerenciales (embudo global, forecast, comisiones, leads sin asignar, leads de otros vendedores, tiempo de respuesta del equipo, conversión por canal). Si te piden algo así, respondé "esa info está disponible solo para Leticia (admin)".
+=== FIN ===`;
         }
 
         // Filtrar tools según rol
@@ -488,8 +509,25 @@ Deno.serve(async (req: Request) => {
               toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: JSON.stringify({ error: 'Tool no autorizada para este rol.' }) });
               continue;
             }
+
+            // Para vendedores: si la tool acepta agent_key, FORZAR su propio
+            // dbId. Ignoramos cualquier agent_key que Claude haya pasado para
+            // prevenir prompt injection del tipo "consultá las negociaciones
+            // del vendedor X".
+            let toolInput = block.input ?? {};
+            if (!isAdmin && TOOLS_WITH_AGENT_FILTER.has(block.name)) {
+              if (!_currentAgentId) {
+                // Safety: vendor sin dbId no debería poder usar tools filtradas
+                // (sin filter mostraría data de todos). Mejor abortar.
+                console.warn(`[assistant] vendor without agent_id tried filter tool: ${block.name}`);
+                toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: JSON.stringify({ error: 'No pude identificar tu perfil de vendedor. Avisale al admin.' }) });
+                continue;
+              }
+              toolInput = { ...toolInput, agent_key: _currentAgentId };
+            }
+
             try {
-              const result = await executeTool(block.name, block.input ?? {});
+              const result = await executeTool(block.name, toolInput);
               toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: JSON.stringify(result) });
             } catch (e) {
               console.error('Tool error', block.name, e);

@@ -26,10 +26,10 @@ const SUGGESTIONS_ADMIN = [
 ];
 
 const SUGGESTIONS_AGENT = [
+  '¿Qué negociaciones tengo activas?',
   '¿Qué propiedades hay disponibles en Plaza Mitre?',
   '¿Cuántas propiedades reservadas tenemos?',
   '¿Quiénes son los vendedores activos del equipo?',
-  'Recordá que prefiero atender por la tarde',
 ];
 
 export default function AssistantChat() {
@@ -83,7 +83,7 @@ export default function AssistantChat() {
           'apikey': anonKey,
           'Authorization': `Bearer ${anonKey}`,
         },
-        body: JSON.stringify({ history, question: text, role: currentUser.role, user_email: currentUser.email }),
+        body: JSON.stringify({ history, question: text, role: currentUser.role, user_email: currentUser.email, agent_id: currentUser.dbId ?? null }),
       });
 
       if (!res.ok || !res.body) {
