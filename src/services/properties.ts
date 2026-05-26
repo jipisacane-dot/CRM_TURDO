@@ -51,6 +51,11 @@ export interface DBProperty {
   ml_item_id: string | null;
   video_url: string | null;
   floor_plan_url: string | null;
+  // Propietario (dueño que consignó la propiedad). Lo carga Leti al
+  // tomar la propiedad. Distinto del propietario_nombre en operations
+  // que es el que firma al vender.
+  owner_name: string | null;
+  owner_phone: string | null;
   created_at: string;
   updated_at: string;
 }

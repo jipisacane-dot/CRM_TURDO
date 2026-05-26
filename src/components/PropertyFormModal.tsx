@@ -246,24 +246,42 @@ export function PropertyFormModal({ open, onClose, property, onSaved }: Props) {
       </div>
 
       <div className="space-y-4 max-h-[60vh] overflow-y-auto">
-        {/* ── BÁSICO ──────────────────────────── */}
+        {/* ── BÁSICO (rediseñado: solo lo esencial para Leti — dirección + propietario + precio) ──────────────────────────── */}
         {section === 'basico' && (
           <div className="space-y-3">
+            <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-xs text-emerald-800">
+              Cargá solo lo esencial. El resto (tipo, ambientes, fotos, etc.) lo podés completar después o nunca — la propiedad se guarda igual.
+            </div>
+
             <Row>
-              <Field label="Operación" required>
-                <Select value={draft.operation_type ?? 'venta'} onChange={v => set('operation_type', v as OperationType)}>
-                  {Object.entries(OPERATION_LABELS).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
-                </Select>
+              <Field label="Calle" required>
+                <Input value={draft.street ?? ''} onChange={v => set('street', v || null)} placeholder="Av. Colón" />
               </Field>
-              <Field label="Tipo de propiedad" required>
-                <Select value={draft.property_type ?? 'departamento'} onChange={v => set('property_type', v as PropertyType)}>
-                  {Object.entries(PROPERTY_TYPE_LABELS).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
-                </Select>
+              <Field label="Altura" required>
+                <Input value={draft.street_number ?? ''} onChange={v => set('street_number', v || null)} placeholder="2300" />
               </Field>
             </Row>
 
             <Row>
-              <Field label="Precio" required>
+              <Field label="Piso">
+                <Input value={draft.floor ?? ''} onChange={v => set('floor', v || null)} placeholder="3°" />
+              </Field>
+              <Field label="Depto / Letra">
+                <Input value={draft.apartment_letter ?? ''} onChange={v => set('apartment_letter', v || null)} placeholder="B" />
+              </Field>
+            </Row>
+
+            <Row>
+              <Field label="Propietario (nombre)">
+                <Input value={draft.owner_name ?? ''} onChange={v => set('owner_name', v || null)} placeholder="Juan Pérez" />
+              </Field>
+              <Field label="Tel. del propietario">
+                <Input value={draft.owner_phone ?? ''} onChange={v => set('owner_phone', v || null)} placeholder="+54 9 223 5..." />
+              </Field>
+            </Row>
+
+            <Row>
+              <Field label="Precio">
                 <Input
                   type="number"
                   value={draft.list_price_usd?.toString() ?? ''}
@@ -277,64 +295,72 @@ export function PropertyFormModal({ open, onClose, property, onSaved }: Props) {
                   <option value="ARS">ARS</option>
                 </Select>
               </Field>
-              <Field label="Expensas (ARS)">
-                <Input
-                  type="number"
-                  value={draft.expenses_ars?.toString() ?? ''}
-                  onChange={v => set('expenses_ars', v ? Number(v) : null)}
-                  placeholder="80000"
-                />
-              </Field>
             </Row>
 
-            <Row>
-              <Field label="Estado">
-                <Select value={draft.status ?? 'borrador'} onChange={v => set('status', v as PropertyStatus)}>
-                  {Object.entries(STATUS_LABELS).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
-                </Select>
-              </Field>
-              <Field label="Condición">
-                <Select value={draft.condition ?? 'usado'} onChange={v => set('condition', v as PropertyCondition)}>
-                  {Object.entries(CONDITION_LABELS).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
-                </Select>
-              </Field>
-            </Row>
-
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={!!draft.is_published}
-                onChange={e => set('is_published', e.target.checked)}
-                className="w-4 h-4"
-              />
-              <span className="text-sm text-gray-700">Publicar en la web pública / portales</span>
-            </label>
+            {/* Campos avanzados — defaults inteligentes ya seteados, casi nunca hace falta tocar */}
+            <details className="mt-3 group">
+              <summary className="cursor-pointer text-xs font-medium text-gray-600 hover:text-crimson select-none">
+                Más opciones (operación, tipo, estado, expensas)
+              </summary>
+              <div className="space-y-3 mt-3 pt-3 border-t border-border">
+                <Row>
+                  <Field label="Operación">
+                    <Select value={draft.operation_type ?? 'venta'} onChange={v => set('operation_type', v as OperationType)}>
+                      {Object.entries(OPERATION_LABELS).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+                    </Select>
+                  </Field>
+                  <Field label="Tipo de propiedad">
+                    <Select value={draft.property_type ?? 'departamento'} onChange={v => set('property_type', v as PropertyType)}>
+                      {Object.entries(PROPERTY_TYPE_LABELS).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+                    </Select>
+                  </Field>
+                </Row>
+                <Row>
+                  <Field label="Estado">
+                    <Select value={draft.status ?? 'borrador'} onChange={v => set('status', v as PropertyStatus)}>
+                      {Object.entries(STATUS_LABELS).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+                    </Select>
+                  </Field>
+                  <Field label="Condición">
+                    <Select value={draft.condition ?? 'usado'} onChange={v => set('condition', v as PropertyCondition)}>
+                      {Object.entries(CONDITION_LABELS).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+                    </Select>
+                  </Field>
+                  <Field label="Expensas (ARS)">
+                    <Input
+                      type="number"
+                      value={draft.expenses_ars?.toString() ?? ''}
+                      onChange={v => set('expenses_ars', v ? Number(v) : null)}
+                      placeholder="80000"
+                    />
+                  </Field>
+                </Row>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={!!draft.is_published}
+                    onChange={e => set('is_published', e.target.checked)}
+                    className="w-4 h-4"
+                  />
+                  <span className="text-sm text-gray-700">Publicar en la web pública / portales</span>
+                </label>
+              </div>
+            </details>
           </div>
         )}
 
-        {/* ── UBICACIÓN ────────────────────────── */}
+        {/* ── UBICACIÓN (extras — calle/piso/letra van en Básico) ─── */}
         {section === 'ubicacion' && (
           <div className="space-y-3">
-            <Row>
-              <Field label="Calle">
-                <Input value={draft.street ?? ''} onChange={v => set('street', v || null)} placeholder="Av. Colón" />
-              </Field>
-              <Field label="Altura">
-                <Input value={draft.street_number ?? ''} onChange={v => set('street_number', v || null)} placeholder="2300" />
-              </Field>
-              <Field label="Piso">
-                <Input value={draft.floor ?? ''} onChange={v => set('floor', v || null)} placeholder="3°" />
-              </Field>
-              <Field label="Depto">
-                <Input value={draft.apartment_letter ?? ''} onChange={v => set('apartment_letter', v || null)} placeholder="B" />
-              </Field>
-            </Row>
+            <div className="text-xs text-muted">
+              La dirección principal (calle, altura, piso, letra) la cargás en <strong>Básico</strong>. Acá completás el barrio, ciudad y coordenadas si querés que aparezca en mapas.
+            </div>
 
             <Field label="Dirección legible (auto si dejás vacío)">
               <Input
                 value={draft.address ?? ''}
                 onChange={v => set('address', v || null)}
-                placeholder="Si dejás vacío se arma con calle + altura"
+                placeholder="Se arma sola con calle + altura"
               />
             </Field>
 
