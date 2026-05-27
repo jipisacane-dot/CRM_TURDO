@@ -123,8 +123,94 @@ Deno.serve(async (req) => {
     });
   }
 
-  let opts: { dry_run?: boolean; limit?: number; only_recent_days?: number; create_if_missing?: boolean; probe_phone?: string; stats?: boolean } = {};
+  let opts: { dry_run?: boolean; limit?: number; only_recent_days?: number; create_if_missing?: boolean; probe_phone?: string; stats?: boolean; ig_backfill?: boolean } = {};
   try { opts = await req.json(); } catch { /* opcional */ }
+
+  // ── IG_BACKFILL: resolver username + auto-link a ManyChat para contactos IG existentes ─
+  if (opts.ig_backfill) {
+    const FB_TOKEN = Deno.env.get('FB_PAGE_ACCESS_TOKEN') ?? '';
+    if (!FB_TOKEN) {
+      return new Response(JSON.stringify({ error: 'FB_PAGE_ACCESS_TOKEN not set' }), {
+        status: 500, headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    const igLimit = opts.limit ?? 200;
+    const igDry = opts.dry_run ?? false;
+    const { data: igContacts, error: igErr } = await sb.from('contacts')
+      .select('id, name, channel_id')
+      .eq('channel', 'instagram')
+      .is('manychat_subscriber_id', null)
+      .not('channel_id', 'is', null)
+      .order('updated_at', { ascending: false })
+      .limit(igLimit);
+    if (igErr) {
+      return new Response(JSON.stringify({ error: igErr.message }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+    }
+
+    const stats = { total: igContacts?.length ?? 0, name_resolved: 0, linked: 0, errored: 0 };
+    const samples: Array<{ id: string; name?: string; ig_username?: string; mc_id?: string; status: string }> = [];
+
+    for (const c of (igContacts ?? [])) {
+      const psid = c.channel_id as string;
+      let resolvedName: string | null = null;
+      let resolvedUsername: string | null = null;
+
+      // 1) Fetch IG profile (name + username)
+      try {
+        const r = await fetch(`https://graph.facebook.com/v20.0/${psid}?fields=name,username&access_token=${FB_TOKEN}`);
+        if (r.ok) {
+          const d = await r.json();
+          resolvedName = d.name ?? null;
+          resolvedUsername = d.username ?? null;
+        }
+      } catch {/* ignore */}
+
+      // 2) Si pudimos resolver, intentar linkear con ManyChat por name
+      let mcId: string | null = null;
+      const searchTerms = [resolvedName, resolvedUsername].filter((s): s is string => !!s && !/^\d+$/.test(s));
+      for (const term of searchTerms) {
+        try {
+          const r = await fetch(
+            `https://api.manychat.com/fb/subscriber/findByName?name=${encodeURIComponent(term)}`,
+            { headers: { Authorization: `Bearer ${MANYCHAT_KEY}` } }
+          );
+          if (!r.ok) continue;
+          const j = await r.json();
+          const list = (j.data ?? []) as Array<Record<string, unknown>>;
+          const igMatch = list.find(s => s.ig_username || s.ig_id);
+          if (igMatch?.id) { mcId = String(igMatch.id); break; }
+        } catch {/* ignore */}
+        await new Promise(r => setTimeout(r, 120)); // rate limit MC
+      }
+
+      // 3) Update si tenemos algo
+      const updates: Record<string, unknown> = {};
+      if (resolvedName && c.name === 'Sin nombre') { updates.name = resolvedName; stats.name_resolved++; }
+      if (mcId) { updates.manychat_subscriber_id = mcId; stats.linked++; }
+      if (!updates.ig_psid) updates.ig_psid = psid;
+
+      if (!igDry && Object.keys(updates).length > 0) {
+        const { error } = await sb.from('contacts').update(updates).eq('id', c.id);
+        if (error) stats.errored++;
+      }
+
+      if (samples.length < 20) {
+        samples.push({
+          id: c.id as string,
+          name: resolvedName ?? undefined,
+          ig_username: resolvedUsername ?? undefined,
+          mc_id: mcId ?? undefined,
+          status: mcId ? 'linked' : resolvedName ? 'name_only' : 'no_data',
+        });
+      }
+      await new Promise(r => setTimeout(r, 80));
+    }
+
+    return new Response(JSON.stringify({ stats, samples, dry_run: igDry }, null, 2), {
+      status: 200, headers: { 'Content-Type': 'application/json' },
+    });
+  }
 
   // Modo STATS: contar cuántos contactos están linkeados y cuántos no
   if (opts.stats) {
