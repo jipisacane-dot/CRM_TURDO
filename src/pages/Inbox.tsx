@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import { useState, useRef, useEffect, useMemo, useCallback, Fragment } from 'react';
 import { InboxItem } from '../components/InboxItem';
 import { useApp } from '../contexts/AppContext';
 import { ChannelIcon, channelLabel } from '../components/ui/ChannelIcon';
@@ -168,6 +168,17 @@ export default function Inbox() {
       });
   }, [leads, isAdmin, currentUser.dbId, channelFilter, qualityFilter, search, showArchived]);
 
+  // Conteos para que el vendor entienda qué está pasando con el toggle de archivados.
+  const archivedCount = useMemo(
+    () => filtered.filter(isArchived).length,
+    [filtered]
+  );
+  const activeCount = filtered.length - archivedCount;
+  const firstArchivedIdx = useMemo(
+    () => showArchived ? filtered.findIndex(isArchived) : -1,
+    [showArchived, filtered]
+  );
+
   // Renderizado incremental con IntersectionObserver: empezamos con 30 items
   // (suficientes para llenar pantalla mobile), cargamos +30 cuando el sentinel
   // entra en vista. Mucho más eficiente que onScroll porque NO dispara en cada
@@ -301,10 +312,14 @@ export default function Inbox() {
               title={showArchived ? 'Ocultar perdidos/ganados/duplicados' : 'Mostrar perdidos/ganados/duplicados al final'}
               className={`text-[10px] px-2 py-1 rounded-full flex-shrink-0 transition-all ${showArchived ? 'bg-crimson text-white' : 'bg-bg-input text-muted hover:text-white'}`}
             >
-              {showArchived ? '📁 Archivados ✓' : '📁 Archivados'}
+              {showArchived ? `📁 Archivados ✓ (${archivedCount})` : '📁 Archivados'}
             </button>
           </div>
-          <div className="hidden">
+          {/* Resumen de cuántos hay activos vs total con archivados */}
+          <div className="text-[11px] text-muted">
+            {showArchived
+              ? `Mostrando ${activeCount} activos + ${archivedCount} archivados`
+              : `${activeCount} ${activeCount === 1 ? 'conversación' : 'conversaciones'} activas`}
           </div>
         </div>
 
@@ -313,15 +328,25 @@ export default function Inbox() {
           {!loading && filtered.length === 0 && (
             <div className="text-center text-muted py-12 text-sm">No hay conversaciones</div>
           )}
-          {visibleLeads.map(lead => (
-            <InboxItem
-              key={lead.id}
-              lead={lead}
-              isSelected={selectedId === lead.id}
-              unread={unreadInLead(lead)}
-              agentName={lead.assignedTo ? agentNameById.get(lead.assignedTo) : undefined}
-              onSelect={handleSelectLead}
-            />
+          {visibleLeads.map((lead, idx) => (
+            <Fragment key={lead.id}>
+              {/* Separador visual antes del primer archivado, solo cuando el toggle
+                  está activo y el archivado realmente entró en la lista visible. */}
+              {showArchived && idx === firstArchivedIdx && idx > 0 && (
+                <div className="flex items-center gap-2 px-4 py-2 bg-bg-soft border-y border-border text-xs text-muted uppercase tracking-wider">
+                  <span>📁</span>
+                  <span>Archivados ({archivedCount})</span>
+                  <span className="text-[10px] opacity-60">— ganados, perdidos o duplicados</span>
+                </div>
+              )}
+              <InboxItem
+                lead={lead}
+                isSelected={selectedId === lead.id}
+                unread={unreadInLead(lead)}
+                agentName={lead.assignedTo ? agentNameById.get(lead.assignedTo) : undefined}
+                onSelect={handleSelectLead}
+              />
+            </Fragment>
           ))}
           {visibleCount < filtered.length && (
             <div ref={sentinelRef} className="text-center py-4 text-muted text-xs">
