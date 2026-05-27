@@ -500,11 +500,28 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Resolver variables del template body en el orden que aparecen
-    // {nombre}, {propiedad}, etc. → ['Juan', 'Brown 2500'] → Meta {{1}}, {{2}}
+    // Resolver variables del template body en el orden que aparecen.
+    // {nombre}, {agente}, {propiedad}, etc. → ['Juan', 'Tomás', ...] → Meta {{1}}, {{2}}, ...
     const firstName = (contact.name as string ?? '').split(' ')[0] || 'cliente';
+
+    // {agente}: nombre del vendedor que está enviando (no Leti). Se resuelve a
+    // partir del agent_id que el frontend incluye en el body (es el dbId del
+    // vendor logueado). Cae a 'Turdo' si no encuentra (cron job, etc).
+    let agentFirstName = 'Turdo';
+    if (agent_id) {
+      const { data: agentRow } = await supabase
+        .from('agents')
+        .select('name')
+        .eq('id', agent_id)
+        .maybeSingle();
+      if (agentRow?.name) {
+        agentFirstName = (agentRow.name as string).split(' ')[0];
+      }
+    }
+
     const varResolvers: Record<string, string> = {
       nombre: firstName,
+      agente: agentFirstName,
       telefono: (contact.phone as string) ?? '',
       email: (contact.email as string) ?? '',
       propiedad: (contact.property_title as string) ?? 'la propiedad consultada',
