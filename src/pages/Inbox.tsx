@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo, useCallback, Fragment } from 'react';
+import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { InboxItem } from '../components/InboxItem';
 import { useApp } from '../contexts/AppContext';
 import { ChannelIcon, channelLabel } from '../components/ui/ChannelIcon';
@@ -150,34 +150,28 @@ export default function Inbox() {
     l.current_stage_key === 'ganado' ||
     !!l.duplicate_of;
 
+  // El toggle de archivados es EXCLUSIVO (filtro): cuando está OFF muestra solo
+  // activos, cuando está ON muestra solo archivados. NO los suma. Pedido Leti
+  // 27/05: "cuando tocas archivados unicamente aparezcan los archivados".
   const filtered = useMemo(() => {
     const scope = isAdmin ? leads : leads.filter(l => currentUser.dbId && l.assignedTo === currentUser.dbId);
     const q = search.toLowerCase();
     return scope
-      .filter(l => showArchived || !isArchived(l))
+      .filter(l => showArchived ? isArchived(l) : !isArchived(l))
       .filter(l => channelFilter === 'all' || l.channel === channelFilter)
       .filter(l => qualityFilter === 'all' ||
         (qualityFilter === 'unrated' ? !l.quality_label : l.quality_label === qualityFilter))
       .filter(l => !q || l.name.toLowerCase().includes(q) || (l.propertyTitle ?? '').toLowerCase().includes(q))
-      .sort((a, b) => {
-        // Cuando showArchived está prendido, los archivados van al fondo
-        const aArch = isArchived(a) ? 1 : 0;
-        const bArch = isArchived(b) ? 1 : 0;
-        if (aArch !== bArch) return aArch - bArch;
-        return new Date(b.lastActivity).getTime() - new Date(a.lastActivity).getTime();
-      });
+      .sort((a, b) => new Date(b.lastActivity).getTime() - new Date(a.lastActivity).getTime());
   }, [leads, isAdmin, currentUser.dbId, channelFilter, qualityFilter, search, showArchived]);
 
-  // Conteos para que el vendor entienda qué está pasando con el toggle de archivados.
-  const archivedCount = useMemo(
-    () => filtered.filter(isArchived).length,
-    [filtered]
-  );
-  const activeCount = filtered.length - archivedCount;
-  const firstArchivedIdx = useMemo(
-    () => showArchived ? filtered.findIndex(isArchived) : -1,
-    [showArchived, filtered]
-  );
+  // Conteo total de archivados (independiente del filtro actual) para mostrar
+  // en el badge del toggle. Se basa en el scope (admin ve todos, vendor solo
+  // los suyos).
+  const totalArchivedInScope = useMemo(() => {
+    const scope = isAdmin ? leads : leads.filter(l => currentUser.dbId && l.assignedTo === currentUser.dbId);
+    return scope.filter(isArchived).length;
+  }, [leads, isAdmin, currentUser.dbId]);
 
   // Renderizado incremental con IntersectionObserver: empezamos con 30 items
   // (suficientes para llenar pantalla mobile), cargamos +30 cuando el sentinel
@@ -309,18 +303,17 @@ export default function Inbox() {
             </div>
             <button
               onClick={() => setShowArchived(s => !s)}
-              title={showArchived ? 'Ocultar perdidos/ganados/duplicados' : 'Mostrar perdidos/ganados/duplicados al final'}
+              title={showArchived ? 'Volver a la bandeja activa' : 'Ver solo perdidos, ganados y duplicados'}
               className={`text-[10px] px-2 py-1 rounded-full flex-shrink-0 transition-all ${showArchived ? 'bg-crimson text-white' : 'bg-bg-input text-muted hover:text-white'}`}
             >
-              {showArchived ? `📁 Archivados ✓ (${archivedCount})` : '📁 Archivados'}
+              {showArchived ? `📁 Volver a activos` : `📁 Archivados (${totalArchivedInScope})`}
             </button>
           </div>
-          {/* Resumen de cuántos hay activos vs total con archivados */}
-          <div className="text-[11px] text-muted">
-            {showArchived
-              ? `Mostrando ${activeCount} activos + ${archivedCount} archivados`
-              : `${activeCount} ${activeCount === 1 ? 'conversación' : 'conversaciones'} activas`}
-          </div>
+          {showArchived && (
+            <div className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-1.5">
+              Mostrando solo archivados ({filtered.length}) — ganados, perdidos o duplicados.
+            </div>
+          )}
         </div>
 
         <div className="flex-1 min-h-0 overflow-y-auto">
@@ -328,25 +321,15 @@ export default function Inbox() {
           {!loading && filtered.length === 0 && (
             <div className="text-center text-muted py-12 text-sm">No hay conversaciones</div>
           )}
-          {visibleLeads.map((lead, idx) => (
-            <Fragment key={lead.id}>
-              {/* Separador visual antes del primer archivado, solo cuando el toggle
-                  está activo y el archivado realmente entró en la lista visible. */}
-              {showArchived && idx === firstArchivedIdx && idx > 0 && (
-                <div className="flex items-center gap-2 px-4 py-2 bg-bg-soft border-y border-border text-xs text-muted uppercase tracking-wider">
-                  <span>📁</span>
-                  <span>Archivados ({archivedCount})</span>
-                  <span className="text-[10px] opacity-60">— ganados, perdidos o duplicados</span>
-                </div>
-              )}
-              <InboxItem
-                lead={lead}
-                isSelected={selectedId === lead.id}
-                unread={unreadInLead(lead)}
-                agentName={lead.assignedTo ? agentNameById.get(lead.assignedTo) : undefined}
-                onSelect={handleSelectLead}
-              />
-            </Fragment>
+          {visibleLeads.map(lead => (
+            <InboxItem
+              key={lead.id}
+              lead={lead}
+              isSelected={selectedId === lead.id}
+              unread={unreadInLead(lead)}
+              agentName={lead.assignedTo ? agentNameById.get(lead.assignedTo) : undefined}
+              onSelect={handleSelectLead}
+            />
           ))}
           {visibleCount < filtered.length && (
             <div ref={sentinelRef} className="text-center py-4 text-muted text-xs">
