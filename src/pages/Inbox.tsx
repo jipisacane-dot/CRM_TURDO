@@ -43,7 +43,7 @@ function LeadAvatar({ lead, size = 'md' }: { lead: Lead; size?: 'sm' | 'md' }) {
 const ALL_CHANNELS: (Channel | 'all')[] = ['all', 'whatsapp', 'instagram', 'facebook', 'email', 'web', 'zonaprop', 'argenprop'];
 
 export default function Inbox() {
-  const { leads, assignLead, sendMessage, loading, dueReminders, completeReminder, currentUser, dbAgents, refreshLeads, loadLeadMessages } = useApp();
+  const { leads, assignLead, sendMessage, loading, dueReminders, completeReminder, currentUser, dbAgents, refreshLeads, loadLeadMessages, markChatRead } = useApp();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [channelFilter, setChannelFilter] = useState<Channel | 'all'>('all');
   const [qualityFilter, setQualityFilter] = useState<'all' | 'hot' | 'warm' | 'cold' | 'unrated'>('all');
@@ -111,6 +111,16 @@ export default function Inbox() {
       setSendError(null);
     }
   }, [selectedId, loadLeadMessages]);
+
+  // Mark-as-read con delay: el chat se marca como leído sólo después de que
+  // el vendor lo tuvo abierto por 1.5s. Esto evita que clicks rápidos pasando
+  // por varios chats marquen todos como leídos sin que los haya leído de verdad
+  // (bug Tomy: "mensajes siguen apareciendo como leídos").
+  useEffect(() => {
+    if (!selectedId) return;
+    const t = window.setTimeout(() => { void markChatRead(selectedId); }, 1500);
+    return () => window.clearTimeout(t);
+  }, [selectedId, markChatRead]);
 
   const changeStage = async (newKey: string) => {
     if (!selected || changingStage) return;

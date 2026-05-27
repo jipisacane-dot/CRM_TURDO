@@ -81,6 +81,7 @@ interface AppContextType {
   loading: boolean;
   refreshLeads: () => Promise<void>;
   loadLeadMessages: (leadId: string) => Promise<void>;
+  markChatRead: (leadId: string) => Promise<void>;
   assignLead: (leadId: string, agentId: string) => Promise<void>;
   bulkAssign: (leadIds: string[], agentId: string) => Promise<{ updated: number; error?: string }>;
   bulkUpdateStage: (leadIds: string[], stageKey: string) => Promise<{ updated: number; error?: string }>;
@@ -193,8 +194,10 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   // Trae los mensajes completos de un lead específico (1 query targeted).
   // Garantiza que el chat abierto siempre tiene todos los mensajes,
   // sin importar cuánto crezca la tabla messages global.
-  // Side effect: marca todos los inbound como leídos al abrir el chat
-  // (comportamiento estándar tipo WhatsApp/Telegram — apenas entrás, leído).
+  // NOTA: ya NO marca como leído automáticamente — eso se hace via markChatRead
+  // que el Inbox dispara con delay (evita marcar como leído chats que el vendor
+  // abre por accidente y cierra rápido). Bug Tomy "mensajes siguen apareciendo
+  // como leídos" → fix: solo mark as read después de 1.5s mirando el chat.
   const loadLeadMessages = useCallback(async (leadId: string) => {
     if (!sessionLoaded) return;
     try {
@@ -207,25 +210,28 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
           lastActivity: msgs.length > 0 ? msgs[msgs.length - 1].created_at : l.lastActivity,
         };
       }));
-
-      // Mark unread inbounds as read. Update optimista para que el badge
-      // desaparezca instantáneo + escribe a DB en background.
-      const hasUnread = msgs.some(m => m.direction === 'in' && !m.read);
-      if (hasUnread) {
-        setLeads(prev => prev.map(l => {
-          if (l.id !== leadId) return l;
-          return {
-            ...l,
-            messages: l.messages.map(m =>
-              m.direction === 'in' && !m.read ? { ...m, read: true } : m
-            ),
-          };
-        }));
-        db.messages.markRead(leadId).catch(e => console.error('markRead err:', e));
-      }
     } catch (e) {
       console.error('Error cargando mensajes del lead:', leadId, e);
     }
+  }, [sessionLoaded]);
+
+  // Marca como leídos los inbounds del chat. Separado de loadLeadMessages para
+  // que el Inbox decida CUÁNDO marcar (con delay de 1.5s, evitando que clicks
+  // rápidos a chats accidentales los marquen como leídos).
+  const markChatRead = useCallback(async (leadId: string) => {
+    if (!sessionLoaded) return;
+    setLeads(prev => prev.map(l => {
+      if (l.id !== leadId) return l;
+      const hasUnread = l.messages.some(m => m.direction === 'in' && !m.read);
+      if (!hasUnread) return l;
+      return {
+        ...l,
+        messages: l.messages.map(m =>
+          m.direction === 'in' && !m.read ? { ...m, read: true } : m
+        ),
+      };
+    }));
+    db.messages.markRead(leadId).catch(e => console.error('markRead err:', e));
   }, [sessionLoaded]);
 
   const refreshReminders = useCallback(async () => {
@@ -573,9 +579,9 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   );
 
   const value = useMemo<AppContextType>(() => ({
-    currentUser, dbAgents, leads, loading, refreshLeads, loadLeadMessages, assignLead, bulkAssign, bulkUpdateStage, updateLeadStatus,
+    currentUser, dbAgents, leads, loading, refreshLeads, loadLeadMessages, markChatRead, assignLead, bulkAssign, bulkUpdateStage, updateLeadStatus,
     sendMessage, unreadCount, dueReminders, createReminder, completeReminder, refreshReminders,
-  }), [currentUser, dbAgents, leads, loading, refreshLeads, loadLeadMessages, unreadCount, dueReminders, refreshReminders]);
+  }), [currentUser, dbAgents, leads, loading, refreshLeads, loadLeadMessages, markChatRead, unreadCount, dueReminders, refreshReminders]);
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 };
