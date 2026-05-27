@@ -12,9 +12,17 @@ export interface MessageTemplate {
   created_by: string | null;
   created_at: string;
   updated_at: string;
+  // Templates 24h+: pre-aprobados por Meta para enviar fuera de ventana
+  is_24h_template?: boolean;
+  meta_template_name?: string | null;
+  meta_template_language?: string | null;
+  meta_template_status?: 'PENDING' | 'APPROVED' | 'REJECTED' | null;
 }
 
-export type TemplatePatch = Partial<Pick<MessageTemplate, 'name' | 'body' | 'category' | 'shortcut' | 'agent_id'>>;
+export type TemplatePatch = Partial<Pick<MessageTemplate,
+  'name' | 'body' | 'category' | 'shortcut' | 'agent_id'
+  | 'is_24h_template' | 'meta_template_name' | 'meta_template_language' | 'meta_template_status'
+>>;
 
 export const templatesApi = {
   async listForAgent(agentId: string): Promise<MessageTemplate[]> {

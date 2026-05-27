@@ -29,12 +29,20 @@ export default function Templates() {
       await templatesApi.create({
         name: draft.name, body: draft.body, category: draft.category,
         shortcut: draft.shortcut, agent_id: draft.agent_id,
+        is_24h_template: draft.is_24h_template,
+        meta_template_name: draft.meta_template_name,
+        meta_template_language: draft.meta_template_language,
+        meta_template_status: draft.meta_template_status,
         created_by: currentUser.dbId ?? '',
       });
     } else {
       await templatesApi.update(draft.id, {
         name: draft.name, body: draft.body, category: draft.category,
         shortcut: draft.shortcut, agent_id: draft.agent_id,
+        is_24h_template: draft.is_24h_template,
+        meta_template_name: draft.meta_template_name,
+        meta_template_language: draft.meta_template_language,
+        meta_template_status: draft.meta_template_status,
       });
     }
     setEditing(null);
@@ -208,6 +216,69 @@ const EditModal = ({ draft, isCreating, isAdmin, onSave, onCancel }: {
             </select>
           </label>
         )}
+
+        {/* Template 24h+: para reactivar contactos fuera de la ventana de 24hs.
+            Solo funciona cuando el template está registrado y APROBADO por Meta
+            en Business Manager → WhatsApp → Templates. */}
+        <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-2">
+          <label className="flex items-start gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={t.is_24h_template ?? false}
+              onChange={e => setT({ ...t, is_24h_template: e.target.checked })}
+              className="mt-1"
+            />
+            <div className="flex-1">
+              <div className="text-sm font-medium text-amber-800">
+                Es plantilla para reactivar fuera de las 24hs
+              </div>
+              <div className="text-[11px] text-amber-700 mt-0.5">
+                Solo se puede usar cuando Meta la aprueba en Business → WhatsApp → Templates.
+              </div>
+            </div>
+          </label>
+          {t.is_24h_template && (
+            <>
+              <label className="block">
+                <span className="text-[11px] text-amber-800">Nombre del template en Meta (case-sensitive)</span>
+                <input
+                  value={t.meta_template_name ?? ''}
+                  onChange={e => setT({ ...t, meta_template_name: e.target.value || null })}
+                  placeholder="ej: saludo_reactivacion_v1"
+                  className="w-full mt-1 px-3 py-2 border border-amber-300 rounded-lg text-sm font-mono text-[#0F172A]"
+                />
+              </label>
+              <label className="block">
+                <span className="text-[11px] text-amber-800">Idioma</span>
+                <select
+                  value={t.meta_template_language ?? 'es_AR'}
+                  onChange={e => setT({ ...t, meta_template_language: e.target.value })}
+                  className="w-full mt-1 px-3 py-2 border border-amber-300 rounded-lg text-sm text-[#0F172A]"
+                >
+                  <option value="es_AR">Español (Argentina)</option>
+                  <option value="es">Español genérico</option>
+                  <option value="es_MX">Español (México)</option>
+                  <option value="en">English</option>
+                </select>
+              </label>
+              {isAdmin && (
+                <label className="block">
+                  <span className="text-[11px] text-amber-800">Estado en Meta</span>
+                  <select
+                    value={t.meta_template_status ?? ''}
+                    onChange={e => setT({ ...t, meta_template_status: (e.target.value || null) as 'PENDING' | 'APPROVED' | 'REJECTED' | null })}
+                    className="w-full mt-1 px-3 py-2 border border-amber-300 rounded-lg text-sm text-[#0F172A]"
+                  >
+                    <option value="">— sin registrar todavía —</option>
+                    <option value="PENDING">PENDING (esperando review de Meta)</option>
+                    <option value="APPROVED">APPROVED (listo para usar)</option>
+                    <option value="REJECTED">REJECTED</option>
+                  </select>
+                </label>
+              )}
+            </>
+          )}
+        </div>
 
         <div className="flex justify-end gap-2 pt-2">
           <button onClick={onCancel} className="px-4 py-2 text-sm bg-white border border-border rounded-lg">Cancelar</button>
