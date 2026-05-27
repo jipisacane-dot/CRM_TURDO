@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Sidebar, MobileNav } from './Sidebar';
 import GlobalSearch from '../GlobalSearch';
+import MobileNotifBanner from '../MobileNotifBanner';
 import { supabase } from '../../services/supabase';
 
 // Mantenido por compatibilidad con código viejo que importa checkSession.
@@ -60,6 +61,8 @@ export const AppLayout = ({ children }: { children: ReactNode }) => {
           style={{ height: 'env(safe-area-inset-top)' }}
           aria-hidden="true"
         />
+        {/* Banner de notificaciones en mobile (solo si no están activadas) */}
+        <MobileNotifBanner />
         {/* Contenedor scrolleable: padding-bottom = altura tab bar + safe area */}
         <div className="flex-1 overflow-y-auto pb-[calc(4.5rem+env(safe-area-inset-bottom))] md:pb-0">
           {children}
