@@ -192,6 +192,11 @@ export default function Pipeline() {
                       <LeadCard
                         key={l.id}
                         lead={l}
+                        agentName={
+                          isAdmin
+                            ? (l.assignedTo ? (agents.find(a => a.id === l.assignedTo)?.name ?? '?') : null)
+                            : undefined
+                        }
                         onDragStart={() => handleDragStart(l.id)}
                         onDragEnd={() => setDraggedId(null)}
                         onClick={() => navigate(`/inbox?lead=${l.id}`)}
@@ -211,9 +216,11 @@ export default function Pipeline() {
 }
 
 const LeadCard = ({
-  lead, onDragStart, onDragEnd, onClick, isUpdating, isDragging,
+  lead, agentName, onDragStart, onDragEnd, onClick, isUpdating, isDragging,
 }: {
   lead: ContactWithStage;
+  // undefined = no mostrar agente (vista vendor). null = sin asignar. string = nombre del agente.
+  agentName: string | null | undefined;
   onDragStart: () => void;
   onDragEnd: () => void;
   onClick: () => void;
@@ -222,6 +229,7 @@ const LeadCard = ({
 }) => {
   const lastActivity = lead.lastActivity ?? lead.createdAt;
   const since = formatDistanceToNow(new Date(lastActivity), { addSuffix: true, locale: es });
+  const firstName = agentName ? agentName.split(' ')[0] : null;
   return (
     <div
       draggable
@@ -235,7 +243,26 @@ const LeadCard = ({
       <div className="flex items-start gap-2">
         <div className="flex-shrink-0 mt-0.5"><ChannelIcon channel={lead.channel} size="sm" /></div>
         <div className="flex-1 min-w-0">
-          <div className="text-sm font-medium text-[#0F172A] truncate">{lead.name ?? 'Sin nombre'}</div>
+          <div className="flex items-center justify-between gap-1">
+            <div className="text-sm font-medium text-[#0F172A] truncate">{lead.name ?? 'Sin nombre'}</div>
+            {/* Etiqueta de vendedor (solo visible en vista admin de Leti).
+                Pedido: "que al lado de cada lead en el pipeline de leti le aparezca
+                de quien es ese lead". */}
+            {agentName !== undefined && (
+              agentName === null ? (
+                <span className="text-[9px] flex-shrink-0 bg-crimson/10 text-crimson px-1.5 py-0.5 rounded-full font-medium">
+                  sin asignar
+                </span>
+              ) : (
+                <span
+                  title={`Asignado a ${agentName}`}
+                  className="text-[9px] flex-shrink-0 bg-bg-soft text-muted px-1.5 py-0.5 rounded-full font-medium"
+                >
+                  {firstName}
+                </span>
+              )
+            )}
+          </div>
           {lead.propertyTitle && (
             <div className="text-[11px] text-muted truncate mt-0.5">{lead.propertyTitle}</div>
           )}
