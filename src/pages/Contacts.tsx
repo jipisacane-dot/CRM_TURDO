@@ -411,8 +411,11 @@ export default function Contacts() {
       )}
 
       {/* Table */}
-      <div className="flex-1 bg-bg-card border border-border rounded-2xl overflow-hidden">
-        <div className="overflow-x-auto">
+      {/* min-h-0 es clave para que el flex-1 respete los bounds del padre y el
+          inner overflow-auto pueda scrollear (sin esto, el div se expande a su
+          natural height = todos los rows = no hay scroll). */}
+      <div className="flex-1 min-h-0 bg-bg-card border border-border rounded-2xl overflow-hidden flex flex-col">
+        <div className="flex-1 overflow-auto">
           <table className="w-full">
             <thead>
               <tr className="border-b border-border">
