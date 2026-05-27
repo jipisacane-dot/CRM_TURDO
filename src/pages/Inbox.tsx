@@ -15,6 +15,7 @@ import MergeContactsModal from '../components/MergeContactsModal';
 import { QualityFilter } from '../components/ui/QualityBadge';
 import QualityPicker from '../components/ui/QualityPicker';
 import MessageMedia from '../components/ui/MessageMedia';
+import LinkifiedText from '../components/ui/LinkifiedText';
 import { pipelineStagesApi, pipelineApi, type PipelineStage } from '../services/pipeline';
 import { db } from '../services/supabase';
 import type { Channel, Lead } from '../types';
@@ -482,7 +483,15 @@ export default function Inbox() {
                   {msg.media_type && msg.media_url ? (
                     <MessageMedia message={msg} onOpenLightbox={setLightboxUrl} />
                   ) : (
-                    <p className="leading-relaxed whitespace-pre-wrap">{msg.content}</p>
+                    <LinkifiedText
+                      text={msg.content}
+                      className="leading-relaxed whitespace-pre-wrap"
+                      linkClassName={
+                        msg.direction === 'out'
+                          ? 'underline underline-offset-2 hover:opacity-80 break-all text-white font-medium'
+                          : 'underline underline-offset-2 hover:opacity-80 break-all text-crimson font-medium'
+                      }
+                    />
                   )}
                   <div className={`text-[10px] mt-1 flex items-center gap-1.5 ${msg.direction === 'out' ? (failed ? 'text-red-200' : 'text-white/50') : 'text-muted'}`}>
                     <span>{format(new Date(msg.timestamp), 'HH:mm')}</span>
