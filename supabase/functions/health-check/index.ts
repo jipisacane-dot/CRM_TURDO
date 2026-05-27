@@ -49,37 +49,37 @@ async function checkDbBasics(): Promise<Check> {
 }
 
 async function checkEmptyChatsRatio(): Promise<Check> {
-  // De los últimos 1000 contacts creados, ¿cuántos no tienen ni un mensaje?
+  // De los últimos 1000 contacts creados (excluyendo duplicates, que por design
+  // no tienen mensajes después del merge), ¿cuántos no tienen ni un mensaje?
   // Si >5% están vacíos → warn (puede ser sync con bug, walk-in mal cargado, etc).
-  const { data, error } = await sb.rpc('count_empty_chats_recent', {});
-  if (error) {
-    // Fallback: hago la query manual
-    const { data: contacts } = await sb.from('contacts').select('id').order('created_at', { ascending: false }).limit(1000);
-    if (!contacts || contacts.length === 0) {
-      return { name: 'empty_chats_ratio', status: 'fail', detail: 'no contacts' };
-    }
-    const ids = contacts.map(c => c.id);
-    const chunks: string[][] = [];
-    for (let i = 0; i < ids.length; i += 80) chunks.push(ids.slice(i, i + 80));
-    let withMessages = 0;
-    for (const chunk of chunks) {
-      const { data: msgs } = await sb.from('messages').select('contact_id').in('contact_id', chunk).limit(2000);
-      const withMsgsInChunk = new Set((msgs ?? []).map(m => m.contact_id));
-      withMessages += withMsgsInChunk.size;
-    }
-    const empty = contacts.length - withMessages;
-    const ratio = empty / contacts.length;
-    if (ratio > 0.05) {
-      return { name: 'empty_chats_ratio', status: 'warn', detail: `${empty}/${contacts.length} (${(ratio * 100).toFixed(1)}%) chats vacíos en los últimos 1000` };
-    }
-    return { name: 'empty_chats_ratio', status: 'pass', detail: `${empty}/${contacts.length} (${(ratio * 100).toFixed(1)}%) chats vacíos (OK)` };
+  //
+  // Excluimos duplicate_of porque después del fix 2026-05-27 los contactos
+  // duplicados quedan vacíos a propósito (sus mensajes se mueven al original).
+  // Contarlos como "vacíos" generaría un falso positivo permanente.
+  const { data: contacts } = await sb
+    .from('contacts')
+    .select('id')
+    .is('duplicate_of', null)
+    .order('created_at', { ascending: false })
+    .limit(1000);
+  if (!contacts || contacts.length === 0) {
+    return { name: 'empty_chats_ratio', status: 'fail', detail: 'no contacts' };
   }
-  const stats = data as { empty: number; total: number };
-  const ratio = stats.empty / stats.total;
+  const ids = contacts.map(c => c.id);
+  const chunks: string[][] = [];
+  for (let i = 0; i < ids.length; i += 80) chunks.push(ids.slice(i, i + 80));
+  let withMessages = 0;
+  for (const chunk of chunks) {
+    const { data: msgs } = await sb.from('messages').select('contact_id').in('contact_id', chunk).limit(2000);
+    const withMsgsInChunk = new Set((msgs ?? []).map(m => m.contact_id));
+    withMessages += withMsgsInChunk.size;
+  }
+  const empty = contacts.length - withMessages;
+  const ratio = empty / contacts.length;
   if (ratio > 0.05) {
-    return { name: 'empty_chats_ratio', status: 'warn', detail: `${stats.empty}/${stats.total} (${(ratio * 100).toFixed(1)}%) chats vacíos` };
+    return { name: 'empty_chats_ratio', status: 'warn', detail: `${empty}/${contacts.length} (${(ratio * 100).toFixed(1)}%) chats vacíos en los últimos 1000 (excluye duplicados)` };
   }
-  return { name: 'empty_chats_ratio', status: 'pass', detail: `${stats.empty}/${stats.total} (${(ratio * 100).toFixed(1)}%) chats vacíos (OK)` };
+  return { name: 'empty_chats_ratio', status: 'pass', detail: `${empty}/${contacts.length} (${(ratio * 100).toFixed(1)}%) chats vacíos (OK)` };
 }
 
 async function checkRlsHelpers(): Promise<Check> {
