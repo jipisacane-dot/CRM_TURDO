@@ -123,8 +123,38 @@ Deno.serve(async (req) => {
     });
   }
 
-  let opts: { dry_run?: boolean; limit?: number; only_recent_days?: number; create_if_missing?: boolean; probe_phone?: string; stats?: boolean; ig_backfill?: boolean } = {};
+  let opts: { dry_run?: boolean; limit?: number; only_recent_days?: number; create_if_missing?: boolean; probe_phone?: string; stats?: boolean; ig_backfill?: boolean; list_forms?: boolean } = {};
   try { opts = await req.json(); } catch { /* opcional */ }
+
+  // ── LIST_FORMS: comparar forms de Meta vs meta_form_sync para detectar faltantes ─
+  if (opts.list_forms) {
+    const FB_TOKEN = Deno.env.get('FB_PAGE_ACCESS_TOKEN') ?? '';
+    const PAGE_ID = Deno.env.get('FB_PAGE_ID') ?? '251875414676744';
+    if (!FB_TOKEN) {
+      return new Response(JSON.stringify({ error: 'FB_PAGE_ACCESS_TOKEN not set' }), {
+        status: 500, headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    const r = await fetch(
+      `https://graph.facebook.com/v21.0/${PAGE_ID}/leadgen_forms?fields=id,name,status,locale,leads_count,created_time&limit=100&access_token=${FB_TOKEN}`
+    );
+    const j = await r.json();
+    if (!r.ok) {
+      return new Response(JSON.stringify({ error: j }), {
+        status: r.status, headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    const allForms = (j.data ?? []) as Array<{ id: string; name: string; status: string; leads_count: number; created_time: string; locale: string }>;
+    const { data: synced } = await sb.from('meta_form_sync').select('form_id');
+    const syncedIds = new Set((synced ?? []).map(s => s.form_id as string));
+    const missing = allForms.filter(f => !syncedIds.has(f.id));
+    return new Response(JSON.stringify({
+      total_in_meta: allForms.length,
+      total_in_sync: syncedIds.size,
+      missing_in_sync: missing.length,
+      missing: missing.map(f => ({ id: f.id, name: f.name, status: f.status, leads_count: f.leads_count, created: f.created_time })),
+    }, null, 2), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  }
 
   // ── IG_BACKFILL: resolver username + auto-link a ManyChat para contactos IG existentes ─
   if (opts.ig_backfill) {
