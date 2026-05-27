@@ -11,6 +11,7 @@ import ReplySuggestions from '../components/ReplySuggestions';
 import ClientPortalButton from '../components/ClientPortalButton';
 import AttachMediaButton from '../components/AttachMediaButton';
 import RecordVoiceButton from '../components/RecordVoiceButton';
+import TemplateReactivationPicker from '../components/TemplateReactivationPicker';
 import MergeContactsModal from '../components/MergeContactsModal';
 import { QualityFilter } from '../components/ui/QualityBadge';
 import QualityPicker from '../components/ui/QualityPicker';
@@ -588,6 +589,16 @@ export default function Inbox() {
                         disabled={sending || !canSend}
                         onSent={() => { void refreshLeads(); }}
                       />
+                      {/* Botón de plantilla de reactivación: solo WSP. Visible siempre que
+                          sea WSP — adentro del modal el picker filtra las plantillas
+                          APPROVED disponibles. Si no hay ninguna, el modal lo aclara. */}
+                      {selected.channel === 'whatsapp' && (
+                        <TemplateReactivationPicker
+                          lead={selected}
+                          agent={currentUser}
+                          onSent={() => { void refreshLeads(); }}
+                        />
+                      )}
                     </div>
                     <div className="flex gap-2 items-end flex-1 min-w-0">
                       <textarea

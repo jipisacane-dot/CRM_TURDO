@@ -37,6 +37,50 @@ function buildCors(req: Request): Record<string, string> | null {
 // ── WhatsApp Cloud API ────────────────────────────────────────────────────────
 interface WAMediaArgs { url: string; type: 'image' | 'video' | 'audio' | 'document'; caption?: string; filename?: string }
 
+// Envía un template MENSAJE iniciado por business (fuera de ventana 24h).
+// Solo funciona con templates pre-aprobados por Meta (status=APPROVED en Business Manager).
+// Los parameters van en orden: el primero reemplaza {{1}}, el segundo {{2}}, etc.
+async function sendWhatsAppTemplate(
+  phone: string,
+  templateName: string,
+  language: string,
+  parameters: string[]
+): Promise<{ ok: boolean; error?: string; wamid?: string }> {
+  if (!WA_PHONE_NUMBER_ID) return { ok: false, error: 'WHATSAPP_PHONE_NUMBER_ID not set' };
+  const to = phone.replace(/\D/g, '');
+
+  const components: Array<Record<string, unknown>> = [];
+  if (parameters.length > 0) {
+    components.push({
+      type: 'body',
+      parameters: parameters.map(p => ({ type: 'text', text: p })),
+    });
+  }
+
+  const payload = {
+    messaging_product: 'whatsapp',
+    to,
+    type: 'template',
+    template: {
+      name: templateName,
+      language: { code: language },
+      ...(components.length > 0 ? { components } : {}),
+    },
+  };
+
+  const resp = await fetch(`https://graph.facebook.com/v20.0/${WA_PHONE_NUMBER_ID}/messages`, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${WA_TOKEN}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const result = await resp.json();
+  if (!resp.ok) {
+    return { ok: false, error: JSON.stringify(result) };
+  }
+  const wamid = result?.messages?.[0]?.id;
+  return { ok: true, wamid };
+}
+
 async function sendWhatsApp(phone: string, text: string, media?: WAMediaArgs) {
   if (!WA_PHONE_NUMBER_ID) return { ok: false, error: 'WHATSAPP_PHONE_NUMBER_ID not set' };
   const to = phone.replace(/\D/g, '');
@@ -404,12 +448,14 @@ Deno.serve(async (req) => {
     media_type?: 'image' | 'video' | 'audio' | 'document';
     media_url?: string; media_path?: string; media_caption?: string; media_mime?: string;
     media_filename?: string; media_size_bytes?: number;
+    // Template fuera de ventana 24h (WSP only, requiere meta_template_status='APPROVED')
+    template_id?: string;
   };
   try { body = await req.json(); }
   catch { return new Response(JSON.stringify({ error: 'Invalid JSON' }), { status: 400, headers: cors }); }
 
-  const { contact_id, content, agent_id, media_type, media_url, media_path, media_caption, media_mime, media_filename, media_size_bytes } = body;
-  if (!contact_id || (!content && !media_url))
+  const { contact_id, content, agent_id, media_type, media_url, media_path, media_caption, media_mime, media_filename, media_size_bytes, template_id } = body;
+  if (!contact_id || (!content && !media_url && !template_id))
     return new Response(JSON.stringify({ error: 'Missing fields' }), { status: 400, headers: cors });
 
   const isMedia = !!(media_type && media_url);
@@ -418,6 +464,99 @@ Deno.serve(async (req) => {
     .from('contacts').select('*').eq('id', contact_id).single();
   if (ce || !contact)
     return new Response(JSON.stringify({ error: 'Contact not found' }), { status: 404, headers: cors });
+
+  // ── TEMPLATE SEND (WSP fuera de ventana 24h) ────────────────────────────────
+  // Si vino template_id, esto reemplaza el flujo normal. Carga el template, valida
+  // que esté APPROVED en Meta, renderiza variables, y manda via Cloud API directo.
+  if (template_id) {
+    if (contact.channel !== 'whatsapp') {
+      return new Response(
+        JSON.stringify({ ok: false, error: 'Templates solo funcionan en WhatsApp' }),
+        { status: 400, headers: cors }
+      );
+    }
+    if (!contact.phone) {
+      return new Response(
+        JSON.stringify({ ok: false, no_phone: true, error: 'El contacto no tiene teléfono cargado' }),
+        { status: 400, headers: cors }
+      );
+    }
+
+    const { data: tpl, error: tplErr } = await supabase
+      .from('message_templates')
+      .select('*')
+      .eq('id', template_id)
+      .single();
+    if (tplErr || !tpl) {
+      return new Response(JSON.stringify({ ok: false, error: 'Template no encontrado' }), { status: 404, headers: cors });
+    }
+    if (!tpl.is_24h_template || tpl.meta_template_status !== 'APPROVED' || !tpl.meta_template_name) {
+      return new Response(
+        JSON.stringify({
+          ok: false,
+          error: `Template no usable: is_24h=${tpl.is_24h_template}, status=${tpl.meta_template_status}, name=${tpl.meta_template_name}`
+        }),
+        { status: 400, headers: cors }
+      );
+    }
+
+    // Resolver variables del template body en el orden que aparecen
+    // {nombre}, {propiedad}, etc. → ['Juan', 'Brown 2500'] → Meta {{1}}, {{2}}
+    const firstName = (contact.name as string ?? '').split(' ')[0] || 'cliente';
+    const varResolvers: Record<string, string> = {
+      nombre: firstName,
+      telefono: (contact.phone as string) ?? '',
+      email: (contact.email as string) ?? '',
+      propiedad: (contact.property_title as string) ?? 'la propiedad consultada',
+      sucursal: (contact.branch as string) ?? 'Corrientes',
+    };
+    const orderedParams: string[] = [];
+    const varRe = /\{(\w+)\}/g;
+    let m: RegExpExecArray | null;
+    const body = tpl.body as string;
+    while ((m = varRe.exec(body)) !== null) {
+      const varName = m[1];
+      orderedParams.push(varResolvers[varName] ?? `{${varName}}`);
+    }
+
+    const r = await sendWhatsAppTemplate(
+      contact.phone as string,
+      tpl.meta_template_name as string,
+      (tpl.meta_template_language as string) ?? 'es_AR',
+      orderedParams
+    );
+
+    // Renderizar el body localmente para guardarlo legible en messages.content
+    let renderedBody = body;
+    for (const [k, v] of Object.entries(varResolvers)) {
+      renderedBody = renderedBody.replaceAll(`{${k}}`, v);
+    }
+
+    const { data: tplMsg } = await supabase.from('messages').insert({
+      contact_id,
+      direction: 'out',
+      content: renderedBody,
+      channel: 'whatsapp',
+      meta_mid: r.wamid ?? null,
+      agent_id: agent_id ?? null,
+      read: true,
+      delivery_status: r.ok ? 'sent' : 'failed',
+      delivery_error: r.ok ? null : (r.error ?? null),
+    }).select().single();
+
+    // Bump use_count del template
+    await supabase.rpc('increment_template_use', { template_id }).catch(() => {});
+    await supabase.from('message_templates')
+      .update({ use_count: (tpl.use_count ?? 0) + 1 })
+      .eq('id', template_id);
+
+    return new Response(JSON.stringify({
+      ok: r.ok,
+      method: 'whatsapp_template',
+      message: tplMsg,
+      delivery: { ok: r.ok, error: r.error, outside_window: false },
+    }), { status: 200, headers: cors });
+  }
 
   // Always save message to DB first (including media metadata)
   const { data: msg, error: me } = await supabase.from('messages').insert({

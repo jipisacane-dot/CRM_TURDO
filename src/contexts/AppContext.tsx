@@ -87,6 +87,7 @@ interface AppContextType {
   bulkUpdateStage: (leadIds: string[], stageKey: string) => Promise<{ updated: number; error?: string }>;
   updateLeadStatus: (leadId: string, status: Lead['status']) => Promise<void>;
   sendMessage: (leadId: string, content: string) => Promise<SendResult>;
+  sendTemplate: (leadId: string, templateId: string) => Promise<SendResult>;
   unreadCount: number;
   dueReminders: DBReminder[];
   createReminder: (contactId: string, title: string, dueAt: string, note?: string) => Promise<void>;
@@ -573,6 +574,20 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     return { ok: true };
   };
 
+  // Enviar template Meta-aprobado para reactivar contactos fuera de ventana 24h.
+  // Diferencia clave con sendMessage: el contenido lo arma el servidor con el
+  // body de la plantilla renderizado (no recibe content del frontend).
+  const sendTemplate = async (leadId: string, templateId: string): Promise<SendResult> => {
+    const { data, error } = await supabase.functions.invoke('send-message', {
+      body: { contact_id: leadId, content: '', template_id: templateId, agent_id: currentUser.dbId ?? null },
+    });
+    if (error) return { ok: false, error: error.message };
+    if (!data?.ok) return { ok: false, error: data?.error ?? data?.delivery?.error ?? 'Error desconocido al enviar template' };
+    // Refrescar mensajes del lead para que aparezca el template enviado
+    await loadLeadMessages(leadId);
+    return { ok: true };
+  };
+
   const unreadCount = useMemo(
     () => leads.reduce((sum, lead) => sum + lead.messages.filter(m => !m.read && m.direction === 'in').length, 0),
     [leads]
@@ -580,7 +595,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
 
   const value = useMemo<AppContextType>(() => ({
     currentUser, dbAgents, leads, loading, refreshLeads, loadLeadMessages, markChatRead, assignLead, bulkAssign, bulkUpdateStage, updateLeadStatus,
-    sendMessage, unreadCount, dueReminders, createReminder, completeReminder, refreshReminders,
+    sendMessage, sendTemplate, unreadCount, dueReminders, createReminder, completeReminder, refreshReminders,
   }), [currentUser, dbAgents, leads, loading, refreshLeads, loadLeadMessages, markChatRead, unreadCount, dueReminders, refreshReminders]);
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
