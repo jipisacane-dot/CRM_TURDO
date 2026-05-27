@@ -22,18 +22,30 @@ interface Props {
   onCreated: () => void;
 }
 
+// Separamos ORIGEN (descriptivo: cómo llegó el contacto) de CANAL (técnico: por
+// dónde le respondés). Antes los teníamos mezclados en 'channel' y eso rompía
+// el envío: si Tomy ponía "walk-in", el contact quedaba con channel='walk-in'
+// que send-message no rutea (rebota con "no se pudo enviar").
+const ORIGENES: { value: string; label: string; emoji: string }[] = [
+  { value: 'local',    label: 'Vino al local',          emoji: '🏬' },
+  { value: 'referido', label: 'Referido por cliente',   emoji: '👥' },
+  { value: 'evento',   label: 'Evento / Open House',    emoji: '🎉' },
+  { value: 'web',      label: 'Sitio web / Otro',       emoji: '🌐' },
+];
+
 const CHANNELS: { value: Channel; label: string }[] = [
-  { value: 'walk-in',  label: 'Entró al local' },
-  { value: 'whatsapp', label: 'WhatsApp (manual)' },
+  { value: 'whatsapp', label: 'WhatsApp (recomendado)' },
   { value: 'email',    label: 'Email' },
-  { value: 'web',      label: 'Referido / Otro' },
 ];
 
 export default function CreateContactModal({ isAdmin, currentAgentDbId, currentAgentBranch, onClose, onCreated }: Props) {
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
-  const [channel, setChannel] = useState<Channel>('walk-in');
+  // Canal default = WhatsApp (99% de los contactos manuales se mensajean por ahí).
+  // Si solo hay email lo auto-cambiamos a 'email' al submit.
+  const [channel, setChannel] = useState<Channel>('whatsapp');
+  const [origen, setOrigen] = useState<string>('local');
   const [propertyTitle, setPropertyTitle] = useState('');
   const [notes, setNotes] = useState('');
   const [assignTo, setAssignTo] = useState<string>(isAdmin ? '' : (currentAgentDbId ?? ''));
@@ -102,17 +114,29 @@ export default function CreateContactModal({ isAdmin, currentAgentDbId, currentA
       const assignedAgent = finalAssignedTo ? agents.find(a => a.id === finalAssignedTo) : null;
       const finalBranch = assignedAgent?.branch ?? currentAgentBranch ?? 'Corrientes';
 
+      // Auto-corrección de canal: si no hay teléfono solo email, forzar email.
+      // Si no hay ni uno (caso raro porque validamos antes), fallback a whatsapp
+      // queda igual — el send-message va a fallar con mensaje claro.
+      const finalChannel: Channel = (!cleanPhone && cleanEmail) ? 'email' : channel;
+
+      // Prepend origen al inicio de notes para que quede registrado de dónde vino
+      const origenLabel = ORIGENES.find(o => o.value === origen);
+      const notesWithOrigen = [
+        origenLabel ? `${origenLabel.emoji} Origen: ${origenLabel.label}` : null,
+        notes.trim() || null,
+      ].filter(Boolean).join('\n\n');
+
       const { error: insertErr } = await supabase.from('contacts').insert({
         name: cleanName,
         phone: cleanPhone || null,
         email: cleanEmail || null,
-        channel,
+        channel: finalChannel,
         channel_id: null,
         status: 'new',
         current_stage_key: 'nuevo',
         assigned_to: finalAssignedTo,
         property_title: propertyTitle.trim() || null,
-        notes: notes.trim() || null,
+        notes: notesWithOrigen || null,
         branch: finalBranch,
       });
 
@@ -190,6 +214,27 @@ export default function CreateContactModal({ isAdmin, currentAgentDbId, currentA
 
           <div>
             <label className="block text-xs text-muted mb-1.5">¿Cómo llegó?</label>
+            <div className="grid grid-cols-2 gap-2">
+              {ORIGENES.map(o => (
+                <button
+                  key={o.value}
+                  type="button"
+                  onClick={() => setOrigen(o.value)}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-sm transition-all ${
+                    origen === o.value
+                      ? 'bg-crimson/10 border-crimson text-crimson font-medium'
+                      : 'bg-bg-input border-border text-muted hover:border-crimson/50'
+                  }`}
+                >
+                  <span>{o.emoji}</span>
+                  <span className="truncate">{o.label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs text-muted mb-1.5">Canal para responderle</label>
             <select
               value={channel}
               onChange={e => setChannel(e.target.value as Channel)}
@@ -197,6 +242,9 @@ export default function CreateContactModal({ isAdmin, currentAgentDbId, currentA
             >
               {CHANNELS.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
             </select>
+            <p className="text-[11px] text-muted mt-1">
+              Para iniciar conversación por WhatsApp con un contacto nuevo necesitás una <strong>plantilla aprobada por Meta</strong>. Sin eso, podés cargarlo y esperar a que él te escriba primero.
+            </p>
           </div>
 
           <div>
