@@ -44,23 +44,35 @@ export const usePushNotifications = () => {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+    // iOS Safari < 16.4 + WebView de algunas apps NO tienen Notification ni PushManager.
+    // Sin estos guards rompe con "undefined is not an object" al cargar el CRM.
+    if (typeof window === 'undefined') return;
+    if (!('serviceWorker' in navigator) || !('PushManager' in window) || typeof Notification === 'undefined') {
       setStatus('unsupported'); return;
     }
     if (Notification.permission === 'denied') {
       setStatus('denied'); return;
     }
     // Check if already subscribed
-    navigator.serviceWorker.ready.then(reg => {
-      reg.pushManager.getSubscription().then(sub => {
-        setStatus(sub ? 'subscribed' : 'unsubscribed');
-      });
-    });
+    try {
+      navigator.serviceWorker.ready.then(reg => {
+        reg.pushManager.getSubscription().then(sub => {
+          setStatus(sub ? 'subscribed' : 'unsubscribed');
+        }).catch(() => setStatus('unsupported'));
+      }).catch(() => setStatus('unsupported'));
+    } catch {
+      setStatus('unsupported');
+    }
   }, []);
 
   const subscribe = async () => {
     setLoading(true);
     try {
+      if (typeof Notification === 'undefined') {
+        alert('Tu navegador no soporta notificaciones. En iPhone necesitás instalar el CRM como app (Compartir → Agregar a inicio) para recibirlas.');
+        setStatus('unsupported');
+        return;
+      }
       const vapidKey = await getVapidPublic();
       if (!vapidKey) {
         alert('No se pudo obtener la clave VAPID. Avisá al admin.');
@@ -87,7 +99,9 @@ export const usePushNotifications = () => {
       setStatus('subscribed');
     } catch (e) {
       console.error('Push subscribe error:', e);
-      if (Notification.permission === 'denied') setStatus('denied');
+      if (typeof Notification !== 'undefined' && Notification.permission === 'denied') {
+        setStatus('denied');
+      }
     } finally {
       setLoading(false);
     }
