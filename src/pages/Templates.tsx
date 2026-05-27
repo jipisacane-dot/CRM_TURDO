@@ -98,8 +98,16 @@ export default function Templates() {
                   <div className="text-sm text-[#0F172A] mt-2 whitespace-pre-wrap">{t.body}</div>
                 </div>
                 <div className="flex gap-2 flex-shrink-0">
-                  <button onClick={() => { setEditing(t); setCreating(false); }} className="text-xs text-crimson hover:underline">Editar</button>
-                  <button onClick={() => handleDelete(t.id)} className="text-xs text-muted hover:text-red-600">Eliminar</button>
+                  {/* Solo el creador o admin pueden editar/borrar. Templates globales
+                      creadas por admin: solo admin las modifica. */}
+                  {(currentUser.role === 'admin' || t.created_by === currentUser.dbId) ? (
+                    <>
+                      <button onClick={() => { setEditing(t); setCreating(false); }} className="text-xs text-crimson hover:underline">Editar</button>
+                      <button onClick={() => handleDelete(t.id)} className="text-xs text-muted hover:text-red-600">Eliminar</button>
+                    </>
+                  ) : (
+                    <span className="text-xs text-muted italic" title="Solo el creador o un admin pueden modificar esta plantilla">solo lectura</span>
+                  )}
                 </div>
               </div>
             </div>

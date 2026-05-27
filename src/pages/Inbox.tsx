@@ -12,7 +12,8 @@ import ClientPortalButton from '../components/ClientPortalButton';
 import AttachMediaButton from '../components/AttachMediaButton';
 import RecordVoiceButton from '../components/RecordVoiceButton';
 import MergeContactsModal from '../components/MergeContactsModal';
-import QualityBadge, { QualityFilter } from '../components/ui/QualityBadge';
+import { QualityFilter } from '../components/ui/QualityBadge';
+import QualityPicker from '../components/ui/QualityPicker';
 import MessageMedia from '../components/ui/MessageMedia';
 import { pipelineStagesApi, pipelineApi, type PipelineStage } from '../services/pipeline';
 import { db } from '../services/supabase';
@@ -46,6 +47,9 @@ export default function Inbox() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [channelFilter, setChannelFilter] = useState<Channel | 'all'>('all');
   const [qualityFilter, setQualityFilter] = useState<'all' | 'hot' | 'warm' | 'cold' | 'unrated'>('all');
+  // Tomy reportó que chats perdidos/duplicados ensucian la bandeja. Por defecto los
+  // escondemos. Un toggle permite mostrarlos cuando hace falta (auditoría, etc).
+  const [showArchived, setShowArchived] = useState(false);
   const [reply, setReply] = useState('');
   const [showAssign, setShowAssign] = useState(false);
   const [showReminder, setShowReminder] = useState(false);
@@ -97,8 +101,15 @@ export default function Inbox() {
   // Cuando se selecciona un lead, traer sus mensajes completos en query targeted.
   // Esto garantiza que el chat abierto tiene todos los mensajes aunque la tabla
   // global haya crecido > 1000 mensajes (límite duro de PostgREST).
+  // También reseteamos el input + el error previo para que un texto que el vendor
+  // estaba escribiendo en chat A no se vaya al chat B por accidente (bug Tomy:
+  // "leads en frío no se envían y aparecen en el último chat que tenes").
   useEffect(() => {
-    if (selectedId) void loadLeadMessages(selectedId);
+    if (selectedId) {
+      void loadLeadMessages(selectedId);
+      setReply('');
+      setSendError(null);
+    }
   }, [selectedId, loadLeadMessages]);
 
   const changeStage = async (newKey: string) => {
@@ -119,23 +130,38 @@ export default function Inbox() {
   // Vendedores filtran por currentUser.dbId (UUID real de DB), NO por currentUser.id (mock string del login).
   // Si dbId todavía no resolvió, lista vacía (evita mostrar leads de otros agentes brevemente).
   // Memoizado para evitar re-filtrado en cada render (1576 items × cada keystroke = lag).
+  // Chats que ensucian la bandeja: ganados, perdidos, y duplicados (que ya
+  // están representados por su original). Si showArchived=true los traemos
+  // igual al final, ordenados por fecha.
+  const isArchived = (l: Lead) =>
+    l.current_stage_key === 'perdido' ||
+    l.current_stage_key === 'ganado' ||
+    !!l.duplicate_of;
+
   const filtered = useMemo(() => {
     const scope = isAdmin ? leads : leads.filter(l => currentUser.dbId && l.assignedTo === currentUser.dbId);
     const q = search.toLowerCase();
     return scope
+      .filter(l => showArchived || !isArchived(l))
       .filter(l => channelFilter === 'all' || l.channel === channelFilter)
       .filter(l => qualityFilter === 'all' ||
         (qualityFilter === 'unrated' ? !l.quality_label : l.quality_label === qualityFilter))
       .filter(l => !q || l.name.toLowerCase().includes(q) || (l.propertyTitle ?? '').toLowerCase().includes(q))
-      .sort((a, b) => new Date(b.lastActivity).getTime() - new Date(a.lastActivity).getTime());
-  }, [leads, isAdmin, currentUser.dbId, channelFilter, qualityFilter, search]);
+      .sort((a, b) => {
+        // Cuando showArchived está prendido, los archivados van al fondo
+        const aArch = isArchived(a) ? 1 : 0;
+        const bArch = isArchived(b) ? 1 : 0;
+        if (aArch !== bArch) return aArch - bArch;
+        return new Date(b.lastActivity).getTime() - new Date(a.lastActivity).getTime();
+      });
+  }, [leads, isAdmin, currentUser.dbId, channelFilter, qualityFilter, search, showArchived]);
 
   // Renderizado incremental con IntersectionObserver: empezamos con 30 items
   // (suficientes para llenar pantalla mobile), cargamos +30 cuando el sentinel
   // entra en vista. Mucho más eficiente que onScroll porque NO dispara en cada
   // pixel de scroll, solo cuando el sentinel cruza el viewport.
   const [visibleCount, setVisibleCount] = useState(30);
-  useEffect(() => { setVisibleCount(30); }, [channelFilter, qualityFilter, search]);
+  useEffect(() => { setVisibleCount(30); }, [channelFilter, qualityFilter, search, showArchived]);
   const visibleLeads = useMemo(() => filtered.slice(0, visibleCount), [filtered, visibleCount]);
   const sentinelRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -254,8 +280,19 @@ export default function Inbox() {
               </button>
             ))}
           </div>
-          <div className="overflow-x-auto pb-1 scrollbar-hide">
-            <QualityFilter selected={qualityFilter} onSelect={setQualityFilter} />
+          <div className="flex items-center gap-2">
+            <div className="overflow-x-auto pb-1 scrollbar-hide flex-1">
+              <QualityFilter selected={qualityFilter} onSelect={setQualityFilter} />
+            </div>
+            <button
+              onClick={() => setShowArchived(s => !s)}
+              title={showArchived ? 'Ocultar perdidos/ganados/duplicados' : 'Mostrar perdidos/ganados/duplicados al final'}
+              className={`text-[10px] px-2 py-1 rounded-full flex-shrink-0 transition-all ${showArchived ? 'bg-crimson text-white' : 'bg-bg-input text-muted hover:text-white'}`}
+            >
+              {showArchived ? '📁 Archivados ✓' : '📁 Archivados'}
+            </button>
+          </div>
+          <div className="hidden">
           </div>
         </div>
 
@@ -292,7 +329,11 @@ export default function Inbox() {
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2">
                 <span className="text-white font-semibold truncate">{selected.name}</span>
-                <QualityBadge lead={selected} size="md" showLabel />
+                <QualityPicker
+                  contactId={selected.id}
+                  current={selected.quality_label ?? null}
+                  onChange={() => { void refreshLeads(); }}
+                />
                 {selected.duplicate_of && (() => {
                   const original = leads.find(l => l.id === selected.duplicate_of);
                   return (
