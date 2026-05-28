@@ -67,11 +67,38 @@ export const usePushNotifications = () => {
     if (Notification.permission === 'denied') {
       setStatus('denied'); return;
     }
-    // Check if already subscribed
+    // Check if already subscribed. ADEMÁS: si el browser tiene una subscription
+    // pero la DB no la tiene linkeada con el agent_id correcto (caso típico
+    // post-bugfix 28/05), la re-guardamos automáticamente. Así el usuario no
+    // tiene que hacer click en nada — apenas abre el CRM, queda relinkado.
+    const ensureLinkedToDb = async (sub: PushSubscription) => {
+      try {
+        const agentId = await resolveAgentId();
+        if (!agentId) return;
+        const key = sub.getKey('p256dh');
+        const auth = sub.getKey('auth');
+        if (!key || !auth) return;
+        const p256dh = btoa(String.fromCharCode(...new Uint8Array(key)));
+        const authStr = btoa(String.fromCharCode(...new Uint8Array(auth)));
+        await supabase.from('push_subscriptions').upsert(
+          { agent_id: agentId, endpoint: sub.endpoint, p256dh, auth: authStr },
+          { onConflict: 'endpoint' }
+        );
+      } catch (e) {
+        console.warn('[push] ensureLinkedToDb err:', e);
+      }
+    };
+
     try {
       navigator.serviceWorker.ready.then(reg => {
         reg.pushManager.getSubscription().then(sub => {
-          setStatus(sub ? 'subscribed' : 'unsubscribed');
+          if (sub) {
+            setStatus('subscribed');
+            // Re-link silenciosamente con agent_id correcto (no bloquea UI)
+            void ensureLinkedToDb(sub);
+          } else {
+            setStatus('unsubscribed');
+          }
         }).catch(() => setStatus('unsupported'));
       }).catch(() => setStatus('unsupported'));
     } catch {
