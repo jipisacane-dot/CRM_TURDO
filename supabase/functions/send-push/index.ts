@@ -198,6 +198,10 @@ Deno.serve(async (req) => {
             'Authorization': vapidAuth,
             'Content-Type': 'application/octet-stream',
             'TTL': '86400',
+            // iOS Apple Push: 'urgency: high' fuerza que se muestre inmediato sin
+            // ser filtrada por modos de batería/silencio. Sin esto, iOS las puede
+            // diferir hasta horas o descartarlas si el dispositivo está optimizando.
+            'Urgency': 'high',
           },
           body: encBody,
         });
