@@ -99,68 +99,97 @@ async function buildVapidAuth(endpoint: string): Promise<string> {
 
 // ── Encrypt push payload ──────────────────────────────────────────────────────
 
+// Encripta el payload usando aes128gcm (RFC 8291) — el formato moderno que
+// iOS Safari requiere obligatorio. El formato anterior (aesgcm RFC 7515) lo
+// acepta Apple en su servidor (devuelve 201) pero iOS lo descarta silencioso.
+// Esta es la implementación correcta.
 async function encryptPayload(
   payload: string,
   p256dhB64: string,
   authB64: string,
 ): Promise<{ body: Uint8Array; headers: Record<string, string> }> {
   const enc = new TextEncoder();
-  const authBytes = Uint8Array.from(atob(authB64.replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0));
+  const authBytes = b64UrlToBytes(authB64);
 
-  // Server key pair
-  const serverKeys = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveKey', 'deriveBits']);
+  // Server ephemeral keypair
+  const serverKeys = await crypto.subtle.generateKey(
+    { name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveBits']
+  );
   const serverPublicRaw = new Uint8Array(await crypto.subtle.exportKey('raw', serverKeys.publicKey));
 
   // Client public key
-  const clientPublicRaw = Uint8Array.from(atob(p256dhB64.replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0));
-  const clientPublicKey = await crypto.subtle.importKey('raw', clientPublicRaw, { name: 'ECDH', namedCurve: 'P-256' }, false, []);
+  const clientPublicRaw = b64UrlToBytes(p256dhB64);
+  const clientPublicKey = await crypto.subtle.importKey(
+    'raw', clientPublicRaw, { name: 'ECDH', namedCurve: 'P-256' }, false, []
+  );
 
-  // Shared secret
-  const sharedBits = new Uint8Array(await crypto.subtle.deriveBits({ name: 'ECDH', public: clientPublicKey }, serverKeys.privateKey, 256));
+  // ECDH shared secret
+  const sharedBits = new Uint8Array(
+    await crypto.subtle.deriveBits(
+      { name: 'ECDH', public: clientPublicKey }, serverKeys.privateKey, 256
+    )
+  );
 
-  // Salt
+  // Random salt (16 bytes)
   const salt = crypto.getRandomValues(new Uint8Array(16));
 
-  // HKDF PRK
-  const prk = await crypto.subtle.importKey('raw', sharedBits, { name: 'HKDF' }, false, ['deriveBits']);
-
-  // auth info
-  const authInfo = enc.encode('Content-Encoding: auth\0');
-  const authInput = new Uint8Array(authInfo.length + authBytes.length);
-  authInput.set(authInfo); authInput.set(authBytes, authInfo.length);
-
-  // key material
-  const keyInfo = new Uint8Array([...enc.encode('Content-Encoding: aesgcm\0'), ...clientPublicRaw, ...serverPublicRaw]);
-  const nonceInfo = new Uint8Array([...enc.encode('Content-Encoding: nonce\0'), ...clientPublicRaw, ...serverPublicRaw]);
-
-  const ikm = await crypto.subtle.deriveBits({ name: 'HKDF', hash: 'SHA-256', salt, info: authInput }, prk, 256);
+  // Step 1: IKM = HKDF-Expand(HKDF-Extract(auth_secret, ecdh_secret), info_ikm, 32)
+  // info_ikm = "WebPush: info\0" || ua_public || as_public
+  const sharedKey = await crypto.subtle.importKey('raw', sharedBits, { name: 'HKDF' }, false, ['deriveBits']);
+  const ikmInfo = new Uint8Array([
+    ...enc.encode('WebPush: info\0'),
+    ...clientPublicRaw,
+    ...serverPublicRaw,
+  ]);
+  const ikm = await crypto.subtle.deriveBits(
+    { name: 'HKDF', hash: 'SHA-256', salt: authBytes, info: ikmInfo },
+    sharedKey, 256
+  );
   const ikmKey = await crypto.subtle.importKey('raw', ikm, { name: 'HKDF' }, false, ['deriveBits']);
 
-  const keyBytes = new Uint8Array(await crypto.subtle.deriveBits({ name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(0), info: keyInfo }, ikmKey, 128));
-  const nonceBytes = new Uint8Array(await crypto.subtle.deriveBits({ name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(0), info: nonceInfo }, ikmKey, 96));
+  // Step 2: CEK = HKDF-Expand(HKDF-Extract(salt, IKM), "Content-Encoding: aes128gcm\0", 16)
+  const cekInfo = enc.encode('Content-Encoding: aes128gcm\0');
+  const cek = await crypto.subtle.deriveBits(
+    { name: 'HKDF', hash: 'SHA-256', salt, info: cekInfo },
+    ikmKey, 128
+  );
 
-  const aesKey = await crypto.subtle.importKey('raw', keyBytes, 'AES-GCM', false, ['encrypt']);
+  // Step 3: nonce = HKDF-Expand(HKDF-Extract(salt, IKM), "Content-Encoding: nonce\0", 12)
+  const nonceInfo = enc.encode('Content-Encoding: nonce\0');
+  const nonce = await crypto.subtle.deriveBits(
+    { name: 'HKDF', hash: 'SHA-256', salt, info: nonceInfo },
+    ikmKey, 96
+  );
+
+  // Step 4: pad + encrypt. RFC 8291: el último record termina con 0x02 (padding delimiter).
   const payloadBytes = enc.encode(payload);
-  const padded = new Uint8Array(2 + payloadBytes.length);
-  padded.set(payloadBytes, 2);
+  const plaintext = new Uint8Array(payloadBytes.length + 1);
+  plaintext.set(payloadBytes);
+  plaintext[payloadBytes.length] = 0x02;
 
-  const encrypted = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv: nonceBytes, tagLength: 128 }, aesKey, padded));
+  const aesKey = await crypto.subtle.importKey('raw', cek, { name: 'AES-GCM' }, false, ['encrypt']);
+  const encrypted = new Uint8Array(
+    await crypto.subtle.encrypt(
+      { name: 'AES-GCM', iv: new Uint8Array(nonce), tagLength: 128 },
+      aesKey, plaintext
+    )
+  );
 
-  const body = new Uint8Array(salt.length + 4 + 1 + serverPublicRaw.length + encrypted.length);
+  // Step 5: armar body = salt(16) || record_size(4 BE) || idlen(1) || keyid(65) || encrypted
+  const recordSize = Math.max(encrypted.length + 18, 18); // mínimo + tag
+  const body = new Uint8Array(16 + 4 + 1 + 65 + encrypted.length);
   let offset = 0;
-  body.set(salt, offset); offset += salt.length;
-  body[offset++] = 0; body[offset++] = 0; body[offset++] = 16; body[offset++] = 0;
-  body[offset++] = serverPublicRaw.length;
-  body.set(serverPublicRaw, offset); offset += serverPublicRaw.length;
+  body.set(salt, offset); offset += 16;
+  new DataView(body.buffer, body.byteOffset).setUint32(offset, recordSize, false);
+  offset += 4;
+  body[offset++] = 65; // keyid length = P-256 uncompressed = 65 bytes
+  body.set(serverPublicRaw, offset); offset += 65;
   body.set(encrypted, offset);
 
+  // aes128gcm NO usa Encryption ni Crypto-Key headers (todo va en el body)
   return {
     body,
-    headers: {
-      'Content-Encoding': 'aesgcm',
-      'Encryption': `salt=${btoa(String.fromCharCode(...salt)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '')}`,
-      'Crypto-Key': `dh=${btoa(String.fromCharCode(...serverPublicRaw)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '')}`,
-    },
+    headers: { 'Content-Encoding': 'aes128gcm' },
   };
 }
 
