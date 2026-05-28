@@ -37,16 +37,50 @@ async function importVapidKey(base64: string, usage: KeyUsage[]): Promise<Crypto
   return crypto.subtle.importKey('raw', raw, { name: 'ECDH', namedCurve: 'P-256' }, true, usage);
 }
 
+// Convierte un Uint8Array a base64url (sin padding) — para usar en JWK
+function bytesToB64Url(bytes: Uint8Array): string {
+  return btoa(String.fromCharCode(...bytes))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=/g, '');
+}
+
+function b64UrlToBytes(b64: string): Uint8Array {
+  return Uint8Array.from(atob(b64.replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0));
+}
+
 async function signVapid(header: string, payload: string, privateKeyB64: string): Promise<string> {
-  const keyData = Uint8Array.from(atob(privateKeyB64.replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0));
+  // VAPID private key viene en formato raw (32 bytes), NO PKCS#8. Para usarla
+  // con WebCrypto ECDSA hay que construir un JWK con el privado + el público
+  // (que extraemos de VAPID_PUBLIC_KEY: 65 bytes uncompressed = 0x04 || X || Y).
+  const privateBytes = b64UrlToBytes(privateKeyB64);
+  if (privateBytes.length !== 32) {
+    throw new Error(`VAPID private key debe ser 32 bytes (es ${privateBytes.length})`);
+  }
+  const publicBytes = b64UrlToBytes(VAPID_PUBLIC);
+  if (publicBytes.length !== 65 || publicBytes[0] !== 0x04) {
+    throw new Error(`VAPID public key debe ser 65 bytes uncompressed (0x04|X|Y), es ${publicBytes.length}`);
+  }
+  const x = publicBytes.slice(1, 33);
+  const y = publicBytes.slice(33, 65);
+
+  const jwk: JsonWebKey = {
+    kty: 'EC',
+    crv: 'P-256',
+    x: bytesToB64Url(x),
+    y: bytesToB64Url(y),
+    d: bytesToB64Url(privateBytes),
+    ext: true,
+  };
+
   const key = await crypto.subtle.importKey(
-    'pkcs8', keyData,
+    'jwk', jwk,
     { name: 'ECDSA', namedCurve: 'P-256' },
     false, ['sign']
   );
   const data = new TextEncoder().encode(`${header}.${payload}`);
   const sig = await crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, key, data);
-  return btoa(String.fromCharCode(...new Uint8Array(sig))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+  return bytesToB64Url(new Uint8Array(sig));
 }
 
 function b64url(obj: unknown): string {
@@ -149,8 +183,10 @@ Deno.serve(async (req) => {
 
     const payload = JSON.stringify({ title, body, contact_id, url: url ?? '/inbox' });
     let sent = 0;
+    const debug: Array<{ endpoint_host: string; status: number | string; error?: string; resp_body?: string }> = [];
 
     for (const sub of subs) {
+      const endpoint_host = (() => { try { return new URL(sub.endpoint).host; } catch { return '?'; } })();
       try {
         const { body: encBody, headers: encHeaders } = await encryptPayload(payload, sub.p256dh, sub.auth);
         const vapidAuth = await buildVapidAuth(sub.endpoint);
@@ -166,6 +202,12 @@ Deno.serve(async (req) => {
           body: encBody,
         });
 
+        let respBody = '';
+        if (!resp.ok && resp.status !== 410 && resp.status !== 404) {
+          try { respBody = (await resp.text()).slice(0, 300); } catch { /* noop */ }
+        }
+        debug.push({ endpoint_host, status: resp.status, resp_body: respBody || undefined });
+
         if (resp.status === 410 || resp.status === 404) {
           // Subscription expired — clean up
           await supabase.from('push_subscriptions').delete().eq('endpoint', sub.endpoint);
@@ -173,11 +215,12 @@ Deno.serve(async (req) => {
           sent++;
         }
       } catch (e) {
+        debug.push({ endpoint_host, status: 'EXCEPTION', error: String(e).slice(0, 200) });
         console.error('Push send error:', e);
       }
     }
 
-    return new Response(JSON.stringify({ sent }), { headers: { ...cors, 'Content-Type': 'application/json' } });
+    return new Response(JSON.stringify({ sent, total: subs.length, debug }), { headers: { ...cors, 'Content-Type': 'application/json' } });
   } catch (e) {
     return new Response(JSON.stringify({ error: String(e) }), { status: 500, headers: cors });
   }
