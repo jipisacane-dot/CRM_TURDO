@@ -1,4 +1,8 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+// Librería oficial de web-push para Deno. Implementa correctamente aes128gcm
+// + VAPID + tag de GCM + record size. Reemplaza la implementación manual que
+// teníamos (que tenía sutiles bugs de byte format que iOS no perdonaba).
+import webpush from 'npm:web-push@3.6.7';
 
 const supabase = createClient(
   Deno.env.get('SUPABASE_URL')!,
@@ -8,6 +12,8 @@ const supabase = createClient(
 const VAPID_PUBLIC  = Deno.env.get('VAPID_PUBLIC_KEY')!;
 const VAPID_PRIVATE = Deno.env.get('VAPID_PRIVATE_KEY')!;
 const VAPID_SUBJECT = Deno.env.get('VAPID_SUBJECT') ?? 'mailto:turdoleticia@gmail.com';
+
+webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC, VAPID_PRIVATE);
 
 // CORS lockdown: solo origenes permitidos.
 const ALLOWED_ORIGINS = [
@@ -217,39 +223,37 @@ Deno.serve(async (req) => {
     for (const sub of subs) {
       const endpoint_host = (() => { try { return new URL(sub.endpoint).host; } catch { return '?'; } })();
       try {
-        const { body: encBody, headers: encHeaders } = await encryptPayload(payload, sub.p256dh, sub.auth);
-        const vapidAuth = await buildVapidAuth(sub.endpoint);
-
-        const resp = await fetch(sub.endpoint, {
-          method: 'POST',
-          headers: {
-            ...encHeaders,
-            'Authorization': vapidAuth,
-            'Content-Type': 'application/octet-stream',
-            'TTL': '86400',
-            // iOS Apple Push: 'urgency: high' fuerza que se muestre inmediato sin
-            // ser filtrada por modos de batería/silencio. Sin esto, iOS las puede
-            // diferir hasta horas o descartarlas si el dispositivo está optimizando.
-            'Urgency': 'high',
+        // Usamos la librería oficial web-push que implementa correctamente
+        // aes128gcm + VAPID JWT + record format. Reemplaza nuestra impl manual
+        // que tenía bugs sutiles que iOS no perdonaba.
+        const result = await webpush.sendNotification(
+          {
+            endpoint: sub.endpoint,
+            keys: { p256dh: sub.p256dh, auth: sub.auth },
           },
-          body: encBody,
-        });
-
-        let respBody = '';
-        if (!resp.ok && resp.status !== 410 && resp.status !== 404) {
-          try { respBody = (await resp.text()).slice(0, 300); } catch { /* noop */ }
-        }
-        debug.push({ endpoint_host, status: resp.status, resp_body: respBody || undefined });
-
-        if (resp.status === 410 || resp.status === 404) {
+          payload,
+          {
+            TTL: 86400,
+            urgency: 'high',
+            contentEncoding: 'aes128gcm',
+          }
+        );
+        debug.push({ endpoint_host, status: result.statusCode });
+        sent++;
+      } catch (e: unknown) {
+        const err = e as { statusCode?: number; body?: string; message?: string };
+        const status = err.statusCode ?? 'EXCEPTION';
+        if (status === 410 || status === 404) {
           // Subscription expired — clean up
           await supabase.from('push_subscriptions').delete().eq('endpoint', sub.endpoint);
-        } else if (resp.ok) {
-          sent++;
         }
-      } catch (e) {
-        debug.push({ endpoint_host, status: 'EXCEPTION', error: String(e).slice(0, 200) });
-        console.error('Push send error:', e);
+        debug.push({
+          endpoint_host,
+          status,
+          error: err.message?.slice(0, 200),
+          resp_body: err.body?.slice(0, 300),
+        });
+        console.error('[push] send fail:', err);
       }
     }
 
