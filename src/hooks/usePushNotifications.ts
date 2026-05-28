@@ -20,12 +20,26 @@ async function getVapidPublic(): Promise<string> {
   return '';
 }
 
-function getSessionAgentId(): string {
+// Resuelve el agent_id REAL del vendor logueado consultando agents.id via
+// auth_user_id de la sesión actual de Supabase Auth. Antes leía crm_session
+// legacy que ya no se usa con el sistema de auth real → siempre caía al
+// fallback 'leticia' y TODAS las subscriptions quedaban a nombre de Leti.
+// Bug reportado 28/05/2026: vendedores activaban notifs pero nunca recibían.
+async function resolveAgentId(): Promise<string | null> {
   try {
-    const raw = localStorage.getItem('crm_session');
-    if (!raw) return 'leticia';
-    return (JSON.parse(raw) as { agentId?: string }).agentId ?? 'leticia';
-  } catch { return 'leticia'; }
+    const { data: { session } } = await supabase.auth.getSession();
+    const authUserId = session?.user?.id;
+    if (!authUserId) return null;
+    const { data } = await supabase
+      .from('agents')
+      .select('id')
+      .eq('auth_user_id', authUserId)
+      .maybeSingle();
+    return (data?.id as string) ?? null;
+  } catch (e) {
+    console.error('[push] resolveAgentId err:', e);
+    return null;
+  }
 }
 
 function urlBase64ToUint8Array(base64String: string): ArrayBuffer {
@@ -91,8 +105,17 @@ export const usePushNotifications = () => {
       const p256dh = btoa(String.fromCharCode(...new Uint8Array(key)));
       const authStr = btoa(String.fromCharCode(...new Uint8Array(auth)));
 
+      // CRITICAL: resolver el agent_id real del usuario logueado.
+      // Si no podemos resolverlo, NO guardamos la subscription (mejor null que
+      // guardarla como 'leticia' y romper notifs para todos).
+      const agentId = await resolveAgentId();
+      if (!agentId) {
+        alert('No se pudo identificar tu usuario. Cerrá sesión, volvé a entrar e intentá de nuevo.');
+        return;
+      }
+
       await supabase.from('push_subscriptions').upsert(
-        { agent_id: getSessionAgentId(), endpoint: sub.endpoint, p256dh, auth: authStr },
+        { agent_id: agentId, endpoint: sub.endpoint, p256dh, auth: authStr },
         { onConflict: 'endpoint' }
       );
 
