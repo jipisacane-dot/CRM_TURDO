@@ -156,8 +156,9 @@ export const appraisalsApi = {
   },
 
   async get(id: string) {
-    const { data, error } = await supabase.from('appraisals').select('*').eq('id', id).single();
+    const { data, error } = await supabase.from('appraisals').select('*').eq('id', id).maybeSingle();
     if (error) throw error;
+    if (!data) throw new Error('Tasación no encontrada');
     return data;
   },
 };

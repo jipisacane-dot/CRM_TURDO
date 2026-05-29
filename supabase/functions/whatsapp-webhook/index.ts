@@ -241,7 +241,7 @@ Deno.serve(async (req) => {
             p_phone: phone,
             p_email: null,
             p_avatar_url: null,
-            p_branch: 'Sucursal Centro',
+            p_branch: 'Corrientes',
           });
           if (!contactIdRpc) continue;
 
@@ -317,7 +317,7 @@ Deno.serve(async (req) => {
           p_phone: phone,
           p_email: null,
           p_avatar_url: null,
-          p_branch: 'Sucursal Centro',
+          p_branch: 'Corrientes',
         });
         if (rpcErr || !contactIdRpc) { console.error('find_or_create_contact err:', rpcErr); continue; }
         const contactId: string = contactIdRpc as string;
@@ -391,7 +391,16 @@ Deno.serve(async (req) => {
           : (text ?? '').slice(0, 100);
 
         supabase.functions.invoke('send-push', {
-          body: { title: name, body: pushBody, contact_id: contactId, url: '/inbox', agent_id: fullContact?.assigned_to ?? undefined },
+          body: {
+            title: name,
+            body: pushBody,
+            contact_id: contactId,
+            url: '/inbox',
+            agent_id: fullContact?.assigned_to ?? undefined,
+            // Admin (Leti) recibe todas las notifs aunque el contacto esté
+            // asignado a otro vendedor — para supervisión en tiempo real.
+            notify_admins: true,
+          },
         }).catch(console.error);
 
         supabase.functions.invoke('classify-message-stage', {

@@ -151,7 +151,7 @@ Deno.serve(async (req) => {
           email,
           avatar_url: avatarUrl,
           status: 'new',
-          branch: 'Sucursal Centro',
+          branch: 'Corrientes',
         })
         .select()
         .single();
@@ -177,7 +177,7 @@ Deno.serve(async (req) => {
           avatar_url: avatarUrl,
           ...(igPsid ? { ig_psid: igPsid } : {}),
           status: 'new',
-          branch: 'Sucursal Centro',
+          branch: 'Corrientes',
           updated_at: new Date().toISOString(),
         },
         { onConflict: 'channel_id,channel', ignoreDuplicates: false }
@@ -355,6 +355,7 @@ Deno.serve(async (req) => {
         contact_id: contact.id,
         url: '/inbox',
         agent_id: contact.assigned_to ?? undefined,
+        notify_admins: true,
       },
     }).catch(console.error);
 

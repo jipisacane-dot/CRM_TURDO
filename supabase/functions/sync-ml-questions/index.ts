@@ -214,7 +214,7 @@ Deno.serve(async (req) => {
         current_stage_key: 'nuevo',
         property_title: itemTitle,
         notes,
-        branch: 'Sucursal Centro',
+        branch: 'Corrientes',
       }).select('id').single();
 
       if (insertErr) {

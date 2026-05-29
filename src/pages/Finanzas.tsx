@@ -157,10 +157,13 @@ export default function Finanzas() {
           const rate = await getBlueRate();
           amount_ars = Math.round(monto * rate.promedio);
         } catch {
-          // Si falla el blue rate, no bloqueamos el guardado — guardamos el
-          // monto original en USD y dejamos amount_ars=0 (el reporte ARS lo
-          // ignora, pero queda el dato real en amount_usd).
-          amount_ars = 0;
+          // Si falla la API del dólar NO dejamos amount_ars=0: eso haría
+          // desaparecer el gasto del total en ARS del mes y Leti vería un número
+          // que miente. Usamos un tipo de cambio de respaldo razonable para que
+          // el gasto igual cuente en ARS; el monto real en USD queda intacto en
+          // amount_usd.
+          const FALLBACK_BLUE_RATE = 1300; // ARS/USD aprox — último recurso
+          amount_ars = Math.round(monto * FALLBACK_BLUE_RATE);
         }
       } else {
         amount_usd = null;

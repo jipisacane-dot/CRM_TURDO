@@ -57,7 +57,7 @@ export const templatesApi = {
 
   async incrementUse(id: string): Promise<void> {
     // increment via RPC-like approach: fetch + update (best-effort, no race-critical)
-    const { data } = await supabase.from('message_templates').select('use_count').eq('id', id).single();
+    const { data } = await supabase.from('message_templates').select('use_count').eq('id', id).maybeSingle();
     if (data) {
       await supabase.from('message_templates').update({ use_count: (data.use_count ?? 0) + 1 }).eq('id', id);
     }

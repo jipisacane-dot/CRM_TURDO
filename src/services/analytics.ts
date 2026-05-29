@@ -190,18 +190,20 @@ export const analyticsApi = {
   },
 
   async forecast(): Promise<ForecastSummary> {
-    const { data, error } = await supabase.from('v_forecast_summary').select('*').single();
+    // maybeSingle + guard: si la vista no tiene filas (cuenta nueva sin datos),
+    // .single() tiraba PGRST116 y la pantalla de Analíticas quedaba en blanco.
+    const { data, error } = await supabase.from('v_forecast_summary').select('*').maybeSingle();
     if (error) throw error;
-    const r = data as ForecastSummary;
-    const conf = Number(r.comisiones_confirmadas_usd);
-    const pend = Number(r.forecast_pending_usd);
-    const neg = Number(r.forecast_negotiations_usd);
+    const r = (data ?? {}) as Partial<ForecastSummary>;
+    const conf = Number(r.comisiones_confirmadas_usd) || 0;
+    const pend = Number(r.forecast_pending_usd) || 0;
+    const neg = Number(r.forecast_negotiations_usd) || 0;
     return {
       comisiones_confirmadas_usd: conf,
       forecast_pending_usd: pend,
       forecast_negotiations_usd: neg,
-      ops_pendientes_count: Number(r.ops_pendientes_count),
-      negotiations_activas_count: Number(r.negotiations_activas_count),
+      ops_pendientes_count: Number(r.ops_pendientes_count) || 0,
+      negotiations_activas_count: Number(r.negotiations_activas_count) || 0,
       total_estimado_usd: conf + pend + neg,
     };
   },

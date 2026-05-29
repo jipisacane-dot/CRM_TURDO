@@ -25,7 +25,11 @@ const isPreviewVercel = (o: string) =>
   /^https:\/\/crm-turdo-[a-z0-9]+-jipisacane-5891s-projects\.vercel\.app$/.test(o);
 
 function buildCors(req: Request): Record<string, string> | null {
-  const origin = req.headers.get('origin') ?? '';
+  const origin = req.headers.get('origin');
+  // Sin Origin = invocación server-to-server (otra edge function llamando vía
+  // supabase.functions.invoke). NO es un request del browser — no necesita
+  // CORS y NO hay que bloquearlo. La auth la valida el JWT del invoker.
+  if (!origin) return {};
   const allowed = ALLOWED_ORIGINS.includes(origin) || isPreviewVercel(origin);
   if (!allowed) return null;
   return {
@@ -207,12 +211,29 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
 
   try {
-    const { title, body, contact_id, url, agent_id } = await req.json() as {
+    const { title, body, contact_id, url, agent_id, notify_admins } = await req.json() as {
       title: string; body: string; contact_id?: string; url?: string; agent_id?: string;
+      notify_admins?: boolean;
     };
 
+    // Construir lista de target agent_ids:
+    //   - agent_id pasado (el asignado al contacto, si hay)
+    //   - + todos los admins (si notify_admins=true) — para que Leti reciba TODO
+    const targetAgentIds = new Set<string>();
+    if (agent_id) targetAgentIds.add(agent_id);
+    if (notify_admins) {
+      const { data: admins } = await supabase
+        .from('agents')
+        .select('id')
+        .eq('role', 'admin')
+        .eq('active', true);
+      for (const a of admins ?? []) targetAgentIds.add(a.id as string);
+    }
+
     let query = supabase.from('push_subscriptions').select('*');
-    if (agent_id) query = query.eq('agent_id', agent_id);
+    if (targetAgentIds.size > 0) {
+      query = query.in('agent_id', Array.from(targetAgentIds));
+    }
     const { data: subs } = await query;
     if (!subs?.length) return new Response(JSON.stringify({ sent: 0 }), { headers: cors });
 

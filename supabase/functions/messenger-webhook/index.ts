@@ -133,7 +133,7 @@ Deno.serve(async (req) => {
         p_phone: null,
         p_email: null,
         p_avatar_url: null,
-        p_branch: 'Sucursal Centro',
+        p_branch: 'Corrientes',
       });
 
       if (contactError || !contactIdRpc) {
@@ -202,7 +202,7 @@ Deno.serve(async (req) => {
         p_phone: null,
         p_email: null,
         p_avatar_url: null,
-        p_branch: 'Sucursal Centro',
+        p_branch: 'Corrientes',
       });
 
       if (!commentContactId) continue;

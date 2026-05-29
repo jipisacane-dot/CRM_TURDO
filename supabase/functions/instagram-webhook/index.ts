@@ -173,7 +173,7 @@ Deno.serve(async (req) => {
         p_phone: null,
         p_email: null,
         p_avatar_url: null,
-        p_branch: 'Sucursal Centro',
+        p_branch: 'Corrientes',
       });
 
       if (contactError || !contactIdRpc) {
@@ -261,6 +261,7 @@ Deno.serve(async (req) => {
           contact_id: contact.id,
           url: '/inbox',
           agent_id: (contact as Record<string, unknown>).assigned_to ?? undefined,
+          notify_admins: true,
         },
       }).catch(console.error);
 
