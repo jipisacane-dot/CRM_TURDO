@@ -33,11 +33,13 @@ export default function PropertyPublic() {
     (async () => {
       setLoading(true);
       try {
+        // Vista pública: solo columnas seguras de propiedades publicadas, accesible
+        // por anon (la tabla base `properties` queda cerrada al público porque tiene
+        // owner_name/owner_phone/notes/captador_id/internal_code).
         const { data: p, error } = await supabase
-          .from('properties')
+          .from('properties_public')
           .select('*')
           .eq('slug', slug)
-          .eq('is_published', true)
           .maybeSingle();
         if (error || !p) {
           setNotFound(true);
@@ -45,7 +47,7 @@ export default function PropertyPublic() {
           return;
         }
         const { data: photos } = await supabase
-          .from('property_photos')
+          .from('property_photos_public')
           .select('*')
           .eq('property_id', p.id)
           .order('order_index', { ascending: true });
