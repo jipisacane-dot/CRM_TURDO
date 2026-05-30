@@ -7,6 +7,7 @@
 //   - meta_template_status = 'APPROVED'
 
 import { useEffect, useState } from 'react';
+import { Send, X } from 'lucide-react';
 import { useApp } from '../contexts/AppContext';
 import { templatesApi, type MessageTemplate, renderTemplate } from '../services/templates';
 import type { Lead, Agent } from '../types';
@@ -61,10 +62,10 @@ export default function TemplateReactivationPicker({ lead, agent, onSent, onCanc
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="bg-amber-500 hover:bg-amber-600 text-white px-3 py-3 rounded-xl text-sm font-medium transition-colors flex-shrink-0 flex items-center gap-1.5"
+        className="bg-amber-500 hover:bg-amber-600 text-white px-3 h-10 rounded-xl text-sm font-medium transition-colors flex-shrink-0 flex items-center gap-1.5"
         title="Reactivar contacto con plantilla aprobada por Meta (fuera de ventana 24h)"
       >
-        <span>📤</span>
+        <Send size={16} />
         <span className="hidden sm:inline">Plantilla</span>
       </button>
 
@@ -83,7 +84,7 @@ export default function TemplateReactivationPicker({ lead, agent, onSent, onCanc
                 <div className="text-xs text-muted mt-0.5">A {lead.name} · {lead.phone}</div>
               </div>
               {!sending && (
-                <button onClick={() => setOpen(false)} className="text-muted hover:text-[#0F172A]">✕</button>
+                <button onClick={() => setOpen(false)} aria-label="Cerrar" className="text-muted hover:text-[#0F172A]"><X size={18} /></button>
               )}
             </div>
 

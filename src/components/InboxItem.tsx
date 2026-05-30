@@ -1,6 +1,7 @@
 import { memo } from 'react';
 import { formatDistanceToNow } from 'date-fns';
 import { es } from 'date-fns/locale';
+import { CornerUpRight } from 'lucide-react';
 import { ChannelIcon } from './ui/ChannelIcon';
 import QualityBadge from './ui/QualityBadge';
 import type { Lead } from '../types';
@@ -19,13 +20,13 @@ function LeadAvatar({ lead }: { lead: Lead }) {
       <img
         src={lead.avatarUrl}
         alt={lead.name}
-        className="w-10 h-10 rounded-full object-cover"
+        className="w-11 h-11 rounded-full object-cover"
         loading="lazy"
       />
     );
   }
   return (
-    <div className="w-10 h-10 rounded-full bg-crimson/20 border border-crimson/30 flex items-center justify-center text-sm font-semibold text-crimson">
+    <div className="w-11 h-11 rounded-full bg-crimson/15 border border-crimson/25 flex items-center justify-center text-sm font-semibold text-crimson">
       {lead.name.charAt(0).toUpperCase()}
     </div>
   );
@@ -37,8 +38,8 @@ function InboxItemBase({ lead, isSelected, unread, agentName, onSelect }: Props)
   return (
     <div
       onClick={() => onSelect(lead.id)}
-      className={`flex gap-3 p-4 border-b border-border cursor-pointer transition-colors active:bg-bg-hover ${
-        isSelected ? 'bg-bg-hover border-l-2 border-l-crimson' : 'hover:bg-bg-hover'
+      className={`flex gap-3 px-4 py-3 border-b border-border cursor-pointer transition-colors active:bg-bg-hover ${
+        isSelected ? 'bg-crimson-50 border-l-[3px] border-l-crimson pl-[13px]' : 'hover:bg-bg-hover'
       }`}
       style={{ contain: 'layout style paint' }}
     >
@@ -51,7 +52,7 @@ function InboxItemBase({ lead, isSelected, unread, agentName, onSelect }: Props)
       <div className="flex-1 min-w-0">
         <div className="flex items-center justify-between gap-1">
           <div className="flex items-center gap-1.5 min-w-0">
-            <span className={`text-sm font-medium truncate ${unread > 0 ? 'text-white' : 'text-gray-300'}`}>
+            <span className={`text-sm truncate ${unread > 0 ? 'font-semibold text-[#0F172A]' : 'font-medium text-slate-600'}`}>
               {lead.name}
             </span>
             <QualityBadge lead={lead} size="sm" />
@@ -74,9 +75,9 @@ function InboxItemBase({ lead, isSelected, unread, agentName, onSelect }: Props)
           )}
         </div>
         {last && (
-          <div className={`text-xs truncate mt-0.5 ${unread > 0 ? 'text-gray-300' : 'text-muted'}`}>
-            {last.direction === 'out' ? '↪ ' : ''}
-            {last.content}
+          <div className={`text-xs truncate mt-0.5 flex items-center gap-1 ${unread > 0 ? 'text-slate-600 font-medium' : 'text-muted'}`}>
+            {last.direction === 'out' && <CornerUpRight size={12} className="flex-shrink-0 opacity-70" />}
+            <span className="truncate">{last.content}</span>
           </div>
         )}
       </div>

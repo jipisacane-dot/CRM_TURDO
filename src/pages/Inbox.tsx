@@ -21,6 +21,7 @@ import { pipelineStagesApi, pipelineApi, type PipelineStage } from '../services/
 import { db } from '../services/supabase';
 import type { Channel, Lead } from '../types';
 import { format } from 'date-fns';
+import { ChevronLeft, Bell, UserPlus, GitMerge, Send, AlertTriangle, Check, X, Pencil } from 'lucide-react';
 
 function LeadAvatar({ lead, size = 'md' }: { lead: Lead; size?: 'sm' | 'md' }) {
   const [imgError, setImgError] = useState(false);
@@ -343,8 +344,14 @@ export default function Inbox() {
       {selected ? (
         <div className="flex-1 flex flex-col min-w-0">
           {/* Header */}
-          <div className="flex items-center gap-3 px-4 py-3 border-b border-border bg-bg-card flex-shrink-0">
-            <button onClick={() => setSelectedId(null)} className="md:hidden text-muted hover:text-white mr-1">←</button>
+          <div className="flex items-center gap-2.5 px-3 sm:px-4 py-2.5 border-b border-border bg-bg-card flex-shrink-0">
+            <button
+              onClick={() => setSelectedId(null)}
+              aria-label="Volver a la lista"
+              className="md:hidden flex items-center justify-center h-9 w-9 -ml-1 rounded-full text-muted hover:bg-bg-hover flex-shrink-0"
+            >
+              <ChevronLeft size={22} />
+            </button>
             <LeadAvatar lead={selected} size="sm" />
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2">
@@ -387,18 +394,20 @@ export default function Inbox() {
                     <button
                       onClick={() => void handleSavePhone()}
                       disabled={savingPhone}
-                      className="text-xs text-emerald-400 hover:text-emerald-300 px-1.5 py-0.5 disabled:opacity-50"
+                      className="text-emerald-500 hover:text-emerald-600 px-1 py-0.5 disabled:opacity-50"
                       title="Guardar"
+                      aria-label="Guardar teléfono"
                     >
-                      {savingPhone ? '...' : '✓'}
+                      {savingPhone ? '...' : <Check size={16} />}
                     </button>
                     <button
                       onClick={() => setEditingPhone(false)}
                       disabled={savingPhone}
-                      className="text-xs text-muted hover:text-white px-1.5 py-0.5"
+                      className="text-muted hover:text-[#0F172A] px-1 py-0.5"
                       title="Cancelar"
+                      aria-label="Cancelar edición"
                     >
-                      ✕
+                      <X size={16} />
                     </button>
                   </div>
                 ) : (
@@ -408,37 +417,38 @@ export default function Inbox() {
                     title="Editar teléfono"
                   >
                     {selected.phone || <span className="italic">Sin teléfono</span>}
-                    <span className="opacity-0 group-hover:opacity-100 transition-opacity text-[10px]">✏️</span>
+                    <Pencil size={11} className="opacity-0 group-hover:opacity-100 transition-opacity" />
                   </button>
                 )}
                 {selected.propertyTitle && <span className="text-muted text-xs truncate">{selected.propertyTitle}</span>}
               </div>
             </div>
-            <div className="flex items-center gap-1 sm:gap-2 flex-shrink-0">
-              <div className="hidden md:block"><StatusBadge status={selected.status} /></div>
+            <div className="flex items-center gap-1 flex-shrink-0">
+              <div className="hidden md:block mr-1"><StatusBadge status={selected.status} /></div>
               <button
                 onClick={() => setShowReminder(true)}
                 title="Crear recordatorio"
                 aria-label="Crear recordatorio"
-                className="text-base sm:text-lg hover:scale-110 transition-transform p-1.5"
+                className="flex items-center justify-center h-9 w-9 rounded-full text-muted hover:bg-bg-hover hover:text-crimson transition-colors"
               >
-                🔔
+                <Bell size={18} />
               </button>
               <button
                 onClick={() => setShowAssign(true)}
                 title={assignedAgent ? `Asignado a ${assignedAgent.name}` : 'Asignar a vendedor'}
-                className="text-xs bg-bg-input hover:bg-bg-hover border border-border rounded-lg px-2 sm:px-3 py-1.5 text-gray-700 transition-all whitespace-nowrap max-w-[110px] truncate"
+                className="flex items-center gap-1.5 text-xs bg-bg-input hover:bg-bg-hover border border-border rounded-full pl-2 pr-2.5 h-9 text-gray-700 transition-all whitespace-nowrap max-w-[120px]"
               >
-                {assignedAgent ? assignedAgent.name.split(' ')[0] : '+ Asignar'}
+                <UserPlus size={15} className="flex-shrink-0 text-muted" />
+                <span className="truncate">{assignedAgent ? assignedAgent.name.split(' ')[0] : 'Asignar'}</span>
               </button>
               {isAdmin && (
                 <button
                   onClick={() => setShowMerge(true)}
                   title="Unificar con otro contacto"
                   aria-label="Unificar con otro contacto"
-                  className="text-base sm:text-lg hover:scale-110 transition-transform p-1.5"
+                  className="flex items-center justify-center h-9 w-9 rounded-full text-muted hover:bg-bg-hover hover:text-crimson transition-colors"
                 >
-                  🔗
+                  <GitMerge size={17} />
                 </button>
               )}
             </div>
@@ -446,8 +456,8 @@ export default function Inbox() {
 
           {/* Selector de etapa pipeline */}
           {stages.length > 0 && (
-            <div className="flex items-center gap-1.5 px-4 py-2 border-b border-border bg-bg-card overflow-x-auto flex-shrink-0">
-              <span className="text-[10px] uppercase tracking-wider text-muted font-medium mr-1 flex-shrink-0">Etapa:</span>
+            <div className="flex items-center gap-1.5 px-3 sm:px-4 py-1.5 border-b border-border bg-bg-card overflow-x-auto scrollbar-hide flex-shrink-0">
+              <span className="hidden sm:inline text-[10px] uppercase tracking-wider text-muted font-medium mr-1 flex-shrink-0">Etapa:</span>
               {stages.map(s => {
                 const active = selected.current_stage_key === s.key;
                 return (
@@ -455,15 +465,15 @@ export default function Inbox() {
                     key={s.key}
                     onClick={() => void changeStage(s.key)}
                     disabled={changingStage}
-                    className={`flex-shrink-0 inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-medium transition-all ${
+                    className={`flex-shrink-0 inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-medium transition-all ${
                       active
                         ? 'text-white shadow-sm'
-                        : 'border border-border text-muted hover:bg-bg-hover hover:text-[#0F172A]'
+                        : 'border border-border text-muted bg-bg-card hover:bg-bg-hover hover:text-[#0F172A]'
                     } ${changingStage ? 'opacity-50' : ''}`}
                     style={active ? { backgroundColor: s.color ?? '#8B1F1F' } : undefined}
                     title={s.name}
                   >
-                    <span>{s.icon}</span>
+                    <span className="text-[12px] leading-none">{s.icon}</span>
                     <span>{s.name}</span>
                   </button>
                 );
@@ -477,12 +487,12 @@ export default function Inbox() {
               const failed = msg.direction === 'out' && msg.delivery_status === 'failed';
               return (
               <div key={msg.id} className={`flex ${msg.direction === 'out' ? 'justify-end' : 'justify-start'}`}>
-                <div className={`max-w-[75%] rounded-2xl px-4 py-2.5 text-sm ${
+                <div className={`max-w-[82%] sm:max-w-[75%] rounded-2xl px-3.5 py-2.5 text-sm shadow-sm ${
                   msg.direction === 'out'
                     ? failed
-                      ? 'bg-red-900/40 border border-red-500/60 text-white rounded-br-md'
+                      ? 'bg-red-50 border border-red-300 text-red-900 rounded-br-md'
                       : 'bg-crimson text-white rounded-br-md'
-                    : 'bg-bg-card border border-border text-gray-200 rounded-bl-md'
+                    : 'bg-white text-slate-700 rounded-bl-md'
                 }`}>
                   {msg.direction === 'out' && msg.agentId && (
                     <div className="text-[10px] text-crimson-50/70 mb-1">
@@ -502,11 +512,11 @@ export default function Inbox() {
                       }
                     />
                   )}
-                  <div className={`text-[10px] mt-1 flex items-center gap-1.5 ${msg.direction === 'out' ? (failed ? 'text-red-200' : 'text-white/50') : 'text-muted'}`}>
+                  <div className={`text-[10px] mt-1 flex items-center gap-1 ${msg.direction === 'out' ? (failed ? 'text-red-500' : 'text-white/70') : 'text-muted'}`}>
                     <span>{format(new Date(msg.timestamp), 'HH:mm')}</span>
                     {failed && (
-                      <span title={msg.delivery_error ?? 'No se pudo entregar'} className="font-medium">
-                        · ⚠ No entregado
+                      <span title={msg.delivery_error ?? 'No se pudo entregar'} className="font-medium inline-flex items-center gap-0.5">
+                        · <AlertTriangle size={11} /> No entregado
                       </span>
                     )}
                   </div>
@@ -561,9 +571,9 @@ export default function Inbox() {
                   )}
                   {sendError && (
                     <div className="mb-3 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-600 flex items-start gap-2">
-                      <span className="flex-shrink-0 mt-0.5">⚠</span>
+                      <AlertTriangle size={14} className="flex-shrink-0 mt-0.5" />
                       <span>{sendError}</span>
-                      <button onClick={() => setSendError(null)} className="ml-auto flex-shrink-0 text-red-400 hover:text-red-600">✕</button>
+                      <button onClick={() => setSendError(null)} aria-label="Cerrar" className="ml-auto flex-shrink-0 text-red-400 hover:text-red-600"><X size={14} /></button>
                     </div>
                   )}
                   {/* Botones de acción: arriba del textarea en mobile, al lado en desktop */}
@@ -616,15 +626,18 @@ export default function Inbox() {
                         placeholder={canSend ? `Responder por ${channelLabel(selected.channel)}...` : 'Envío bloqueado por política del canal'}
                         rows={2}
                         disabled={!canSend}
-                        className="flex-1 min-w-0 bg-bg-input border border-border rounded-xl px-4 py-3 text-sm text-white placeholder-muted outline-none focus:border-crimson resize-none disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="flex-1 min-w-0 bg-bg-input border border-border rounded-2xl px-4 py-3 text-sm text-white placeholder-muted outline-none focus:border-crimson focus:ring-2 focus:ring-crimson/15 resize-none disabled:opacity-50 disabled:cursor-not-allowed transition-shadow"
                       />
                       <button
                         onClick={handleSend}
                         disabled={!reply.trim() || sending || !canSend}
-                        title={!canSend ? blockReason : ''}
-                        className="bg-crimson hover:bg-crimson-light text-white px-4 py-3 rounded-xl text-sm font-medium transition-all disabled:opacity-40 disabled:cursor-not-allowed flex-shrink-0 min-w-[72px]"
+                        title={!canSend ? blockReason : 'Enviar'}
+                        aria-label="Enviar"
+                        className="bg-crimson hover:bg-crimson-light text-white rounded-xl text-sm font-medium transition-all disabled:opacity-40 disabled:cursor-not-allowed flex-shrink-0 flex items-center justify-center gap-1.5 h-12 w-12 sm:w-auto sm:px-4 shadow-sm"
                       >
-                        {sending ? '...' : 'Enviar'}
+                        {sending
+                          ? <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                          : <><Send size={18} /><span className="hidden sm:inline">Enviar</span></>}
                       </button>
                     </div>
                   </div>

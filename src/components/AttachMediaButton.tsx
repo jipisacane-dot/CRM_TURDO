@@ -1,5 +1,7 @@
-import { useRef, useState } from 'react';
+import { useRef, useState, type ComponentType } from 'react';
+import { Paperclip, FolderOpen, Camera, FileText, X } from 'lucide-react';
 import { supabase } from '../services/supabase';
+import { ComposerIconButton } from './ui/ComposerIconButton';
 
 interface Props {
   contactId: string;
@@ -143,22 +145,19 @@ export default function AttachMediaButton({ contactId, agentId, channel, onSent,
         onChange={e => { const f = e.target.files?.[0]; if (f) void onPick(f); e.target.value = ''; }} />
 
       <div className="relative flex-shrink-0">
-        <button
-          type="button"
+        <ComposerIconButton
+          icon={Paperclip}
+          label="Adjuntar foto, video, audio o documento"
           onClick={() => setShowMenu(s => !s)}
           disabled={disabled}
-          title="Adjuntar foto, video, audio o documento"
-          className="bg-bg-input border border-border hover:border-crimson text-muted hover:text-white px-3 py-3 rounded-xl text-sm transition-colors disabled:opacity-40"
-        >
-          📎
-        </button>
+        />
 
         {showMenu && (
           <>
             <div className="fixed inset-0 z-40" onClick={() => setShowMenu(false)} />
             <div className="absolute bottom-full mb-2 left-0 bg-white border border-border rounded-xl shadow-xl p-1 z-50 w-44">
-              <MenuItem icon="📁" label="Archivo" onClick={() => inputRef.current?.click()} />
-              <MenuItem icon="📷" label="Sacar foto" onClick={() => cameraRef.current?.click()} />
+              <MenuItem icon={FolderOpen} label="Archivo" onClick={() => inputRef.current?.click()} />
+              <MenuItem icon={Camera} label="Sacar foto" onClick={() => cameraRef.current?.click()} />
             </div>
           </>
         )}
@@ -170,7 +169,7 @@ export default function AttachMediaButton({ contactId, agentId, channel, onSent,
             <div className="p-4 border-b border-border flex items-center justify-between">
               <div className="text-base font-semibold text-[#0F172A]">Enviar {preview.type}</div>
               {!uploading && (
-                <button onClick={onCancel} className="text-muted hover:text-[#0F172A]">✕</button>
+                <button onClick={onCancel} aria-label="Cancelar" className="text-muted hover:text-[#0F172A]"><X size={18} /></button>
               )}
             </div>
             <div className="p-4 space-y-3">
@@ -185,7 +184,7 @@ export default function AttachMediaButton({ contactId, agentId, channel, onSent,
               )}
               {preview.type === 'document' && (
                 <div className="bg-bg-soft rounded-xl p-4 text-center">
-                  <div className="text-4xl mb-2">📄</div>
+                  <FileText size={40} className="mx-auto mb-2 text-muted" />
                   <div className="text-sm font-medium text-[#0F172A]">{preview.file.name}</div>
                   <div className="text-xs text-muted">{(preview.file.size / 1024 / 1024).toFixed(2)} MB</div>
                 </div>
@@ -228,12 +227,12 @@ export default function AttachMediaButton({ contactId, agentId, channel, onSent,
   );
 }
 
-const MenuItem = ({ icon, label, onClick }: { icon: string; label: string; onClick: () => void }) => (
+const MenuItem = ({ icon: Icon, label, onClick }: { icon: ComponentType<{ size?: number; className?: string }>; label: string; onClick: () => void }) => (
   <button
     onClick={onClick}
     className="w-full flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-bg-soft text-sm text-[#0F172A] text-left"
   >
-    <span>{icon}</span>
+    <Icon size={16} className="text-muted" />
     <span>{label}</span>
   </button>
 );

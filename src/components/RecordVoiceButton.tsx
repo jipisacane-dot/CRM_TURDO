@@ -3,7 +3,9 @@
 // Funciona en desktop (Chrome/Edge/Firefox) y mobile (Chrome/Safari iOS+macOS).
 
 import { useEffect, useRef, useState } from 'react';
+import { Mic, Square, X, Trash2, RotateCcw } from 'lucide-react';
 import { supabase } from '../services/supabase';
+import { ComposerIconButton } from './ui/ComposerIconButton';
 
 interface Props {
   contactId: string;
@@ -177,24 +179,22 @@ export default function RecordVoiceButton({ contactId, agentId, channel, onSent,
   return (
     <>
       {state === 'idle' && (
-        <button
-          type="button"
+        <ComposerIconButton
+          icon={Mic}
+          label="Grabar nota de voz"
           onClick={() => void startRecording()}
           disabled={disabled}
-          title="Grabar nota de voz"
-          className="bg-bg-input border border-border hover:border-crimson text-muted hover:text-white px-3 py-3 rounded-xl text-sm transition-colors flex-shrink-0 disabled:opacity-40"
-        >
-          🎤
-        </button>
+        />
       )}
       {state === 'recording' && (
         <button
           type="button"
           onClick={stopRecording}
           title="Parar grabación"
-          className="bg-red-600 text-white px-3 py-3 rounded-xl text-sm transition-colors flex-shrink-0 animate-pulse"
+          aria-label="Parar grabación"
+          className="flex items-center gap-1.5 bg-red-600 text-white px-3 h-10 rounded-xl text-sm font-medium tabular-nums transition-colors flex-shrink-0 animate-pulse"
         >
-          ⏹ {fmtTime(seconds)}
+          <Square size={14} fill="currentColor" /> {fmtTime(seconds)}
         </button>
       )}
 
@@ -209,8 +209,8 @@ export default function RecordVoiceButton({ contactId, agentId, channel, onSent,
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={cancelRecording}>
           <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden" onClick={e => e.stopPropagation()}>
             <div className="p-4 border-b border-border flex items-center justify-between">
-              <div className="text-base font-semibold text-[#0F172A]">🎤 Nota de voz · {fmtTime(seconds)}</div>
-              <button onClick={cancelRecording} className="text-muted hover:text-[#0F172A]">✕</button>
+              <div className="text-base font-semibold text-[#0F172A] flex items-center gap-2"><Mic size={18} className="text-crimson" /> Nota de voz · {fmtTime(seconds)}</div>
+              <button onClick={cancelRecording} aria-label="Cerrar" className="text-muted hover:text-[#0F172A]"><X size={18} /></button>
             </div>
             <div className="p-4 space-y-3">
               <audio src={audioUrl} controls className="w-full" autoPlay={false} />
@@ -222,12 +222,12 @@ export default function RecordVoiceButton({ contactId, agentId, channel, onSent,
                 className="w-full px-3 py-2 border border-border rounded-lg text-sm text-[#0F172A] resize-none"
               />
               <div className="flex gap-2 justify-between">
-                <button onClick={cancelRecording} className="px-3 py-2 bg-white border border-border rounded-lg text-sm text-red-600">
-                  🗑 Descartar
+                <button onClick={cancelRecording} className="flex items-center gap-1.5 px-3 py-2 bg-white border border-border rounded-lg text-sm text-red-600">
+                  <Trash2 size={15} /> Descartar
                 </button>
                 <div className="flex gap-2">
-                  <button onClick={() => { cancelRecording(); setTimeout(() => void startRecording(), 100); }} className="px-3 py-2 bg-white border border-border rounded-lg text-sm">
-                    🔄 Re-grabar
+                  <button onClick={() => { cancelRecording(); setTimeout(() => void startRecording(), 100); }} className="flex items-center gap-1.5 px-3 py-2 bg-white border border-border rounded-lg text-sm">
+                    <RotateCcw size={15} /> Re-grabar
                   </button>
                   <button onClick={sendRecording} className="px-4 py-2 bg-crimson text-white rounded-lg text-sm font-medium">
                     Enviar por {channel}
@@ -253,9 +253,10 @@ export default function RecordVoiceButton({ contactId, agentId, channel, onSent,
           type="button"
           onClick={cancelRecording}
           title="Cancelar grabación"
-          className="px-2 py-3 rounded-xl text-xs bg-white border border-red-300 text-red-600 hover:bg-red-50 flex-shrink-0"
+          aria-label="Cancelar grabación"
+          className="flex items-center justify-center h-10 w-10 rounded-xl bg-white border border-red-300 text-red-600 hover:bg-red-50 flex-shrink-0"
         >
-          ✕
+          <X size={18} />
         </button>
       )}
     </>

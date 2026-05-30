@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
+import { Share2 } from 'lucide-react';
 import { portalsApi, type PortalSummary, type PortalEvent } from '../services/portals';
 import { supabase } from '../services/supabase';
+import { ComposerIconButton } from './ui/ComposerIconButton';
 import type { Lead, Agent } from '../types';
 import { formatDistanceToNow } from 'date-fns';
 import { es } from 'date-fns/locale';
@@ -119,21 +121,20 @@ export default function ClientPortalButton({ lead, agent }: Props) {
 
   return (
     <>
-      <button
-        type="button"
+      <ComposerIconButton
+        icon={Share2}
+        label="Generar link del cliente"
         onClick={() => setOpen(true)}
-        title="Generar link del cliente"
-        className={`bg-bg-input border ${activePortal ? 'border-emerald-400 text-emerald-500' : 'border-border text-muted hover:border-crimson hover:text-crimson'} px-3 py-3 rounded-xl text-sm transition-colors flex-shrink-0`}
-      >
-        🔗
-      </button>
+        active={!!activePortal}
+        tone="success"
+      />
 
       {open && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => { setOpen(false); setShowCreate(false); setCreatedUrl(null); }}>
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[85vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
             <div className="p-4 border-b border-border flex items-center justify-between">
               <div>
-                <div className="text-base font-semibold text-[#0F172A]">🔗 Portal del cliente</div>
+                <div className="text-base font-semibold text-[#0F172A] flex items-center gap-2"><Share2 size={18} className="text-crimson" /> Portal del cliente</div>
                 <div className="text-xs text-muted">Link único con propiedades, agenda de visita y tracking en vivo.</div>
               </div>
               <button onClick={() => setOpen(false)} className="text-muted hover:text-[#0F172A] text-sm px-2">✕</button>

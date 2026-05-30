@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
+import { FileText } from 'lucide-react';
 import { templatesApi, renderTemplate, type MessageTemplate } from '../services/templates';
+import { ComposerIconButton } from './ui/ComposerIconButton';
 import type { Lead, Agent } from '../types';
 
 interface Props {
@@ -43,20 +45,17 @@ export default function TemplatePicker({ lead, agent, onPick }: Props) {
 
   return (
     <>
-      <button
-        type="button"
+      <ComposerIconButton
+        icon={FileText}
+        label="Plantillas (Ctrl+/)"
         onClick={() => setOpen(true)}
-        title="Plantillas (Ctrl+/)"
-        className="bg-bg-input border border-border hover:border-crimson text-muted hover:text-white px-3 py-3 rounded-xl text-sm transition-colors flex-shrink-0"
-      >
-        📋
-      </button>
+      />
 
       {open && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-end md:items-center justify-center p-4" onClick={() => setOpen(false)}>
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[70vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
             <div className="p-3 border-b border-border flex items-center gap-2">
-              <span className="text-base">📋</span>
+              <FileText size={18} className="text-crimson flex-shrink-0" />
               <input
                 autoFocus
                 value={filter}

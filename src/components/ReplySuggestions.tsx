@@ -1,5 +1,7 @@
 import { useState } from 'react';
+import { Sparkles } from 'lucide-react';
 import { supabase } from '../services/supabase';
+import { ComposerIconButton } from './ui/ComposerIconButton';
 import type { Lead, Agent } from '../types';
 
 interface Suggestion {
@@ -61,15 +63,12 @@ export default function ReplySuggestions({ lead, agent, onPick }: Props) {
 
   return (
     <>
-      <button
-        type="button"
+      <ComposerIconButton
+        icon={Sparkles}
+        label="Sugerir respuesta con IA"
         onClick={handleClick}
-        title="Sugerir respuesta con IA"
         disabled={!lastIn}
-        className="bg-bg-input border border-border hover:border-crimson text-muted hover:text-crimson px-3 py-3 rounded-xl text-sm transition-colors flex-shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
-      >
-        ✨
-      </button>
+      />
 
       {open && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-end md:items-center justify-center p-4" onClick={() => setOpen(false)}>
@@ -77,7 +76,7 @@ export default function ReplySuggestions({ lead, agent, onPick }: Props) {
             <div className="p-4 border-b border-border flex items-center justify-between">
               <div>
                 <div className="text-base font-semibold text-[#0F172A] flex items-center gap-2">
-                  <span>✨</span> Sugerencias de respuesta
+                  <Sparkles size={18} className="text-crimson" /> Sugerencias de respuesta
                 </div>
                 <div className="text-xs text-muted">3 variantes con tonos distintos. Tocá una para insertarla en el chat.</div>
               </div>
